@@ -6,6 +6,7 @@ const links = [
   { href: "/admin/teams", label: "팀 코드" },
   { href: "/admin/standings", label: "그룹 순위·대진 생성" },
   { href: "/admin/matches", label: "경기 현황" },
+  { href: "/admin/tournaments", label: "대회 관리" },
 ];
 
 export default function AdminNav() {

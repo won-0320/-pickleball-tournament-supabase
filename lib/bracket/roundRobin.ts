@@ -71,6 +71,34 @@ export function generateRoundRobinMatches(
   return matches;
 }
 
+/**
+ * Adds a single new team to a group that already has a round-robin
+ * schedule: generates one match against every existing team, without
+ * touching any already-generated match. Not woven into the normal
+ * "조별리그 N라운드" round structure (that would require regenerating
+ * everyone's schedule) — instead labeled as a distinct "추가경기" round at
+ * `startRoundIndex`, sorted after every existing round.
+ */
+export function generateMatchesForNewTeam(
+  division: string,
+  group: string,
+  existingTeams: RRTeamRef[],
+  newTeam: RRTeamRef,
+  startRoundIndex: number
+): RoundRobinMatchDraft[] {
+  return existingTeams.map((existing, i) => ({
+    division,
+    group,
+    round: "조별리그 추가경기",
+    roundIndex: startRoundIndex,
+    order: i + 1,
+    teamAKey: existing.key,
+    teamAName: existing.teamName,
+    teamBKey: newTeam.key,
+    teamBName: newTeam.teamName,
+  }));
+}
+
 export interface GroupSummary {
   division: string;
   group: string;

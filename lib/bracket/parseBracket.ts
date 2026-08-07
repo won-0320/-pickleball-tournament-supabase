@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { teamKey } from "./teamKey";
 
 export interface RosterTeamDraft {
   key: string; // `${division}::${group}::${normalizedTeamName}`
@@ -28,14 +29,6 @@ function cell(row: RawRow, key: string): string {
   const value = row[key];
   if (value === null || value === undefined) return "";
   return String(value).trim();
-}
-
-function normalizeTeamName(name: string): string {
-  return name.replace(/\s+/g, " ").trim();
-}
-
-function teamKey(division: string, group: string, teamName: string): string {
-  return `${division}::${group}::${normalizeTeamName(teamName)}`;
 }
 
 /**

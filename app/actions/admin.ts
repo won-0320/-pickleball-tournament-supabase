@@ -9,9 +9,11 @@ import {
   isAdminSession,
 } from "@/lib/session/adminSession";
 import { parseBracket, type ParseIssue, type RosterTeamDraft } from "@/lib/bracket/parseBracket";
+import { teamKey } from "@/lib/bracket/teamKey";
 import { importBracket, type ImportedTeam } from "@/lib/bracket/importBracket";
 import {
   generateRoundRobinMatches,
+  generateMatchesForNewTeam,
   summarizeGroups,
   type GroupSummary,
   type RoundRobinMatchDraft,
@@ -20,13 +22,23 @@ import { buildSeedList } from "@/lib/bracket/seeding";
 import { buildKnockoutBracket } from "@/lib/bracket/knockoutBracket";
 import { commitKnockoutBracket } from "@/lib/bracket/commitKnockoutBracket";
 import { computeGroupStandings, type TeamStanding } from "@/lib/standings/standings";
-import { getActiveTournament, teamsCol, teamDoc, matchesCol, matchDoc } from "@/lib/firebase/collections";
+import { getDb } from "@/lib/firebase/admin";
+import {
+  getActiveTournament,
+  tournamentsCol,
+  tournamentDoc,
+  teamsCol,
+  teamDoc,
+  matchesCol,
+  matchDoc,
+} from "@/lib/firebase/collections";
+import { commitInChunks, type BatchOp } from "@/lib/firebase/batchWrite";
 import {
   resolveDispute as resolveDisputeFlow,
   overrideScore as overrideScoreFlow,
 } from "@/lib/matches/scoreFlow";
 import { applyCascadingAdvancement } from "@/lib/matches/advancement";
-import type { Match, MatchStage, MatchStatus, Team } from "@/types/domain";
+import type { Match, MatchStage, MatchStatus, Team, TournamentStatus } from "@/types/domain";
 
 export interface AdminLoginState {
   error: string | null;
@@ -487,4 +499,230 @@ export async function generateKnockoutBracket(
   revalidatePath("/admin/matches");
 
   return { warnings: bracketResult.warnings, matchCount };
+}
+
+export interface TournamentListItem {
+  id: string;
+  name: string;
+  status: TournamentStatus;
+  createdAt: number;
+  teamCount: number;
+  matchCount: number;
+}
+
+export async function listTournaments(): Promise<{
+  authError?: string;
+  tournaments: TournamentListItem[];
+}> {
+  const admin = await isAdminSession();
+  if (!admin) return { authError: "관리자 인증이 필요합니다.", tournaments: [] };
+
+  const snap = await tournamentsCol().get();
+  const tournaments = await Promise.all(
+    snap.docs.map(async (doc) => {
+      const t = doc.data();
+      const [teamsSnap, matchesSnap] = await Promise.all([
+        teamsCol(t.id).get(),
+        matchesCol(t.id).get(),
+      ]);
+      return {
+        id: t.id,
+        name: t.name,
+        status: t.status,
+        createdAt: t.createdAt,
+        teamCount: teamsSnap.size,
+        matchCount: matchesSnap.size,
+      };
+    })
+  );
+
+  tournaments.sort((a, b) => b.createdAt - a.createdAt);
+  return { tournaments };
+}
+
+export interface DeleteTournamentState {
+  error: string | null;
+}
+
+export async function deleteTournament(tournamentId: string): Promise<DeleteTournamentState> {
+  const admin = await isAdminSession();
+  if (!admin) return { error: "관리자 인증이 필요합니다." };
+
+  await getDb().recursiveDelete(tournamentDoc(tournamentId));
+
+  revalidatePath("/admin/tournaments");
+  revalidatePath("/admin/teams");
+  revalidatePath("/admin/matches");
+  revalidatePath("/admin/standings");
+
+  return { error: null };
+}
+
+export interface AddTeamInput {
+  division: string;
+  group: string;
+  teamName: string;
+  player1: string;
+  player2: string;
+}
+
+export interface AddTeamResult {
+  error?: string;
+  team?: ImportedTeam;
+  matchCount?: number;
+}
+
+const TEAM_CODE_LENGTH = 4;
+
+function generateTeamCode(used: Set<string>): string {
+  let code: string;
+  do {
+    code = String(Math.floor(Math.random() * 10 ** TEAM_CODE_LENGTH)).padStart(
+      TEAM_CODE_LENGTH,
+      "0"
+    );
+  } while (used.has(code));
+  used.add(code);
+  return code;
+}
+
+export async function addTeam(input: AddTeamInput): Promise<AddTeamResult> {
+  const admin = await isAdminSession();
+  if (!admin) return { error: "관리자 인증이 필요합니다." };
+
+  const division = input.division.trim();
+  const group = input.group.trim();
+  const teamName = input.teamName.trim();
+  const player1 = input.player1.trim();
+  const player2 = input.player2.trim();
+
+  if (!division || !group || !teamName || !player1 || !player2) {
+    return { error: "모든 항목을 입력해주세요." };
+  }
+
+  const tournament = await getActiveTournament();
+  if (!tournament) return { error: "활성화된 대회가 없습니다." };
+
+  const [teamsSnap, matchesSnap] = await Promise.all([
+    teamsCol(tournament.id).get(),
+    matchesCol(tournament.id).get(),
+  ]);
+  const allTeams = teamsSnap.docs.map((d) => d.data());
+  const allMatches = matchesSnap.docs.map((d) => d.data());
+
+  const knockoutAlready = allMatches.some(
+    (m) => m.division === division && m.stage === "knockout"
+  );
+  if (knockoutAlready) {
+    return { error: "토너먼트가 이미 생성된 수준에는 팀을 추가할 수 없습니다." };
+  }
+
+  const newKey = teamKey(division, group, teamName);
+  const duplicate = allTeams.some(
+    (t) => teamKey(t.division, t.group ?? "", t.teamName) === newKey
+  );
+  if (duplicate) {
+    return { error: `"${teamName}" 팀이 이미 같은 조에 등록되어 있습니다.` };
+  }
+
+  const groupTeams = allTeams.filter((t) => t.division === division && t.group === group);
+  const groupMatches = allMatches.filter(
+    (m) => m.division === division && m.group === group && m.stage === "group"
+  );
+  const startRoundIndex =
+    groupMatches.length === 0
+      ? 0
+      : Math.max(...groupMatches.map((m) => m.roundIndex ?? 0)) + 1;
+
+  const usedCodes = new Set(allTeams.map((t) => t.code));
+  const code = generateTeamCode(usedCodes);
+  const now = Date.now();
+
+  const ops: BatchOp[] = [];
+  const teamRef = teamsCol(tournament.id).doc();
+  const team: Team = {
+    id: teamRef.id,
+    tournamentId: tournament.id,
+    code,
+    division,
+    group,
+    teamName,
+    player1,
+    player2,
+    createdAt: now,
+  };
+  ops.push((batch) => batch.set(teamRef, team));
+
+  const newMatchDrafts = generateMatchesForNewTeam(
+    division,
+    group,
+    groupTeams.map((t) => ({ key: teamKey(t.division, t.group ?? "", t.teamName), teamName: t.teamName })),
+    { key: newKey, teamName },
+    startRoundIndex
+  );
+
+  const teamIdByKey = new Map<string, string>();
+  for (const t of groupTeams) {
+    teamIdByKey.set(teamKey(t.division, t.group ?? "", t.teamName), t.id);
+  }
+  teamIdByKey.set(newKey, teamRef.id);
+
+  let matchCount = 0;
+  for (const draft of newMatchDrafts) {
+    const teamAId = teamIdByKey.get(draft.teamAKey);
+    const teamBId = teamIdByKey.get(draft.teamBKey);
+    if (!teamAId || !teamBId) continue;
+
+    const matchRef = matchesCol(tournament.id).doc();
+    const match: Match = {
+      id: matchRef.id,
+      tournamentId: tournament.id,
+      division,
+      stage: "group",
+      group,
+      round: draft.round,
+      roundIndex: draft.roundIndex,
+      order: draft.order,
+      court: null,
+      teamAId,
+      teamBId,
+      teamAName: draft.teamAName,
+      teamBName: draft.teamBName,
+      scoreA: null,
+      scoreB: null,
+      status: "pending",
+      submittedBy: null,
+      submittedScoreA: null,
+      submittedScoreB: null,
+      opponentScoreA: null,
+      opponentScoreB: null,
+      resolvedBy: null,
+      isBye: false,
+      nextMatchId: null,
+      nextMatchSlot: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    ops.push((batch) => batch.set(matchRef, match));
+    matchCount += 1;
+  }
+
+  if (!tournament.divisions.includes(division)) {
+    ops.push((batch) =>
+      batch.update(tournamentDoc(tournament.id), {
+        divisions: [...tournament.divisions, division].sort(),
+      })
+    );
+  }
+
+  await commitInChunks(ops);
+
+  revalidatePath("/admin/teams");
+  revalidatePath("/admin/standings");
+  revalidatePath("/admin/matches");
+
+  return {
+    team: { id: teamRef.id, code, division, group, teamName, player1, player2 },
+    matchCount,
+  };
 }

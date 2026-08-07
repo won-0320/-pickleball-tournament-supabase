@@ -61,6 +61,7 @@ export default function TeamCodeTable({ teams }: { teams: Team[] }) {
           <thead className="bg-neutral-100 text-neutral-600">
             <tr>
               <th className="px-3 py-2">수준</th>
+              <th className="px-3 py-2">조</th>
               <th className="px-3 py-2">팀명</th>
               <th className="px-3 py-2">선수1</th>
               <th className="px-3 py-2">선수2</th>
@@ -71,6 +72,7 @@ export default function TeamCodeTable({ teams }: { teams: Team[] }) {
             {filtered.map((t) => (
               <tr key={t.id} className="border-t border-neutral-200">
                 <td className="px-3 py-2">{t.division}</td>
+                <td className="px-3 py-2">{t.group ?? "-"}</td>
                 <td className="px-3 py-2">{t.teamName}</td>
                 <td className="px-3 py-2">{t.player1}</td>
                 <td className="px-3 py-2">{t.player2}</td>
@@ -81,7 +83,7 @@ export default function TeamCodeTable({ teams }: { teams: Team[] }) {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-neutral-400">
+                <td colSpan={6} className="px-3 py-6 text-center text-neutral-400">
                   표시할 팀이 없습니다.
                 </td>
               </tr>

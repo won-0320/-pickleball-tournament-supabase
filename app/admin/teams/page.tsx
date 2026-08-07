@@ -1,10 +1,14 @@
 import { listTeams, requireAdmin } from "@/app/actions/admin";
 import AdminNav from "../AdminNav";
 import TeamCodeTable from "./TeamCodeTable";
+import AddTeamForm from "./AddTeamForm";
 
 export default async function AdminTeamsPage() {
   await requireAdmin();
   const { tournament, teams } = await listTeams();
+
+  const divisions = Array.from(new Set(teams.map((t) => t.division))).sort();
+  const groups = Array.from(new Set(teams.map((t) => t.group).filter((g): g is string => !!g))).sort();
 
   return (
     <main className="min-h-dvh">
@@ -19,6 +23,11 @@ export default async function AdminTeamsPage() {
           <p className="mb-6 text-sm text-neutral-500">
             활성화된 대회가 없습니다. 먼저 대진표를 업로드해주세요.
           </p>
+        )}
+        {tournament && (
+          <div className="mb-4">
+            <AddTeamForm divisions={divisions} groups={groups} />
+          </div>
         )}
         <TeamCodeTable teams={teams} />
       </div>

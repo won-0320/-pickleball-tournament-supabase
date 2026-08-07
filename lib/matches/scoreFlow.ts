@@ -1,0 +1,176 @@
+import type { Match, MatchSide } from "@/types/domain";
+
+export interface ScoreFlowError {
+  code: "invalid_score" | "wrong_state" | "own_submission";
+  message: string;
+}
+
+export type ScoreFlowResult =
+  | { ok: true; patch: Partial<Match> }
+  | { ok: false; error: ScoreFlowError };
+
+function validateScores(scoreOwn: number, scoreOpponent: number): ScoreFlowError | null {
+  if (
+    !Number.isInteger(scoreOwn) ||
+    !Number.isInteger(scoreOpponent) ||
+    scoreOwn < 0 ||
+    scoreOpponent < 0
+  ) {
+    return { code: "invalid_score", message: "점수는 0 이상의 정수여야 합니다." };
+  }
+  if (scoreOwn === scoreOpponent) {
+    return { code: "invalid_score", message: "두 팀의 점수가 같을 수 없습니다." };
+  }
+  return null;
+}
+
+function otherSide(side: MatchSide): MatchSide {
+  return side === "teamA" ? "teamB" : "teamA";
+}
+
+/**
+ * First score submission for a match. Only allowed while the match is
+ * still "pending" (no one has submitted yet). Moves the match into
+ * "awaiting_confirmation" without setting the authoritative score.
+ */
+export function submitScore(
+  match: Match,
+  side: MatchSide,
+  scoreA: number,
+  scoreB: number,
+  now: number
+): ScoreFlowResult {
+  if (match.status !== "pending") {
+    return {
+      ok: false,
+      error: {
+        code: "wrong_state",
+        message: "이미 점수가 제출된 경기입니다.",
+      },
+    };
+  }
+
+  const ownScore = side === "teamA" ? scoreA : scoreB;
+  const opponentScore = side === "teamA" ? scoreB : scoreA;
+  const invalid = validateScores(ownScore, opponentScore);
+  if (invalid) return { ok: false, error: invalid };
+
+  return {
+    ok: true,
+    patch: {
+      status: "awaiting_confirmation",
+      submittedBy: side,
+      submittedScoreA: scoreA,
+      submittedScoreB: scoreB,
+      updatedAt: now,
+    },
+  };
+}
+
+/**
+ * Opposing team confirms (or disputes) a submitted score. Only the side
+ * that did NOT submit may confirm. Matching scores finalize the match;
+ * mismatched scores flip it to "disputed" for admin resolution.
+ */
+export function confirmScore(
+  match: Match,
+  side: MatchSide,
+  scoreA: number,
+  scoreB: number,
+  now: number
+): ScoreFlowResult {
+  if (match.status !== "awaiting_confirmation") {
+    return {
+      ok: false,
+      error: {
+        code: "wrong_state",
+        message: "확인 대기 중인 경기가 아닙니다.",
+      },
+    };
+  }
+
+  if (match.submittedBy === side) {
+    return {
+      ok: false,
+      error: {
+        code: "own_submission",
+        message: "본인 팀이 제출한 점수입니다. 상대팀의 확인을 기다려주세요.",
+      },
+    };
+  }
+
+  if (match.submittedBy !== otherSide(side)) {
+    return {
+      ok: false,
+      error: {
+        code: "wrong_state",
+        message: "이 경기의 참가팀이 아닙니다.",
+      },
+    };
+  }
+
+  const ownScore = side === "teamA" ? scoreA : scoreB;
+  const opponentScore = side === "teamA" ? scoreB : scoreA;
+  const invalid = validateScores(ownScore, opponentScore);
+  if (invalid) return { ok: false, error: invalid };
+
+  const matchesSubmission =
+    scoreA === match.submittedScoreA && scoreB === match.submittedScoreB;
+
+  if (matchesSubmission) {
+    return {
+      ok: true,
+      patch: {
+        status: "confirmed",
+        scoreA,
+        scoreB,
+        resolvedBy: "confirmation",
+        updatedAt: now,
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    patch: {
+      status: "disputed",
+      opponentScoreA: scoreA,
+      opponentScoreB: scoreB,
+      updatedAt: now,
+    },
+  };
+}
+
+/**
+ * Admin sets the final authoritative score for a disputed match.
+ */
+export function resolveDispute(
+  match: Match,
+  finalScoreA: number,
+  finalScoreB: number,
+  now: number
+): ScoreFlowResult {
+  if (match.status !== "disputed") {
+    return {
+      ok: false,
+      error: {
+        code: "wrong_state",
+        message: "분쟁 상태의 경기가 아닙니다.",
+      },
+    };
+  }
+
+  const invalid = validateScores(finalScoreA, finalScoreB);
+  if (invalid) return { ok: false, error: invalid };
+
+  return {
+    ok: true,
+    patch: {
+      status: "confirmed",
+      scoreA: finalScoreA,
+      scoreB: finalScoreB,
+      resolvedBy: "admin",
+      updatedAt: now,
+    },
+  };
+}

@@ -4,6 +4,7 @@ import { adminLogout } from "@/app/actions/admin";
 const links = [
   { href: "/admin/upload", label: "대진표 업로드" },
   { href: "/admin/teams", label: "팀 코드" },
+  { href: "/admin/standings", label: "그룹 순위·대진 생성" },
   { href: "/admin/matches", label: "경기 현황" },
 ];
 

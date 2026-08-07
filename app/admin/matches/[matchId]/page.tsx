@@ -21,7 +21,7 @@ export default async function AdminMatchDetailPage({
         <Link href="/admin/matches" className="mb-4 inline-block text-sm text-neutral-400 underline">
           ← 경기 현황
         </Link>
-        {authError || !match || !teamA || !teamB ? (
+        {authError || !match ? (
           <p className="text-neutral-700">{authError ?? "경기를 찾을 수 없습니다."}</p>
         ) : (
           <MatchAdminDetail match={match} teamA={teamA} teamB={teamB} />

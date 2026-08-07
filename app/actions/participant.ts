@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { getActiveTournament, teamsCol, teamDoc, matchesCol, matchDoc } from "@/lib/firebase/collections";
 import { createTeamSession, destroyTeamSession, getTeamSession } from "@/lib/session/teamSession";
 import { submitScore as submitScoreFlow, confirmScore as confirmScoreFlow } from "@/lib/matches/scoreFlow";
+import { applyCascadingAdvancement } from "@/lib/matches/advancement";
 import type { Match, MatchSide, Team } from "@/types/domain";
 
 export interface JoinState {
@@ -80,7 +81,10 @@ export async function getMyMatches(): Promise<MyMatchesResult> {
   ]);
   const matches = [...asA.docs, ...asB.docs].map((d) => d.data());
   matches.sort(
-    (a, b) => a.round.localeCompare(b.round) || (a.order ?? 0) - (b.order ?? 0)
+    (a, b) =>
+      a.stage.localeCompare(b.stage) ||
+      (a.roundIndex ?? 0) - (b.roundIndex ?? 0) ||
+      (a.order ?? 0) - (b.order ?? 0)
   );
 
   return { team, matches };
@@ -182,6 +186,7 @@ export async function confirmMatchScore(
   if (!result.ok) return { error: result.error.message };
 
   await ref.update(result.patch);
+  await applyCascadingAdvancement(session.tournamentId, { ...match, ...result.patch });
   revalidatePath(`/team/${session.teamId}`);
   revalidatePath(`/team/${session.teamId}/match/${matchId}`);
   return { error: null };

@@ -18,8 +18,8 @@ export default function MatchDetail({
 }: {
   match: Match;
   side: MatchSide;
-  ownTeamName: string;
-  opponentTeamName: string;
+  ownTeamName: string | null;
+  opponentTeamName: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -58,16 +58,50 @@ export default function MatchDetail({
   const header = (
     <div className="mb-6 flex items-center justify-between">
       <div>
-        <p className="text-xs text-neutral-500">{match.round}</p>
+        <p className="text-xs text-neutral-500">
+          {match.stage === "group" ? `조별리그 · ${match.group}조` : "토너먼트"} · {match.round}
+        </p>
         <h1 className="text-xl font-bold text-neutral-900">
-          {ownTeamName} <span className="text-neutral-400">vs</span> {opponentTeamName}
+          {ownTeamName} <span className="text-neutral-400">vs</span>{" "}
+          {opponentTeamName ?? (match.isBye ? "부전승" : "상대 결정 대기")}
         </h1>
       </div>
-      <span className={`rounded-full px-3 py-1 text-xs font-medium ${STATUS_BADGE_CLASSES[match.status]}`}>
-        {STATUS_LABELS[match.status]}
-      </span>
+      {match.isBye ? (
+        <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700">
+          부전승
+        </span>
+      ) : (
+        <span className={`rounded-full px-3 py-1 text-xs font-medium ${STATUS_BADGE_CLASSES[match.status]}`}>
+          {STATUS_LABELS[match.status]}
+        </span>
+      )}
     </div>
   );
+
+  // 0a. Bye — no opponent, automatically advanced.
+  if (match.isBye) {
+    return (
+      <div>
+        {header}
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-5 text-center">
+          <p className="text-lg font-semibold text-neutral-900">부전승으로 다음 라운드에 자동 진출했습니다</p>
+          <p className="mt-2 text-sm text-sky-700">경기를 진행하지 않아도 됩니다.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 0b. Opponent not yet determined (waiting on a previous knockout match).
+  if (opponentTeamName === null) {
+    return (
+      <div>
+        {header}
+        <p className="rounded-lg border border-dashed border-neutral-300 p-4 text-center text-sm text-neutral-400">
+          상대팀이 아직 결정되지 않았습니다. 이전 라운드 경기 결과를 기다려주세요.
+        </p>
+      </div>
+    );
+  }
 
   // 1. Nobody has submitted yet — show entry form.
   if (match.status === "pending") {

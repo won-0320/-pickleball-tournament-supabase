@@ -8,11 +8,25 @@ import {
   destroyAdminSession,
   isAdminSession,
 } from "@/lib/session/adminSession";
-import { parseBracket, type MatchDraft, type ParseIssue, type TeamDraft } from "@/lib/bracket/parseBracket";
+import { parseBracket, type ParseIssue, type RosterTeamDraft } from "@/lib/bracket/parseBracket";
 import { importBracket, type ImportedTeam } from "@/lib/bracket/importBracket";
+import {
+  generateRoundRobinMatches,
+  summarizeGroups,
+  type GroupSummary,
+  type RoundRobinMatchDraft,
+} from "@/lib/bracket/roundRobin";
+import { buildSeedList } from "@/lib/bracket/seeding";
+import { buildKnockoutBracket } from "@/lib/bracket/knockoutBracket";
+import { commitKnockoutBracket } from "@/lib/bracket/commitKnockoutBracket";
+import { computeGroupStandings, type TeamStanding } from "@/lib/standings/standings";
 import { getActiveTournament, teamsCol, teamDoc, matchesCol, matchDoc } from "@/lib/firebase/collections";
-import { resolveDispute as resolveDisputeFlow } from "@/lib/matches/scoreFlow";
-import type { Match, MatchStatus, Team } from "@/types/domain";
+import {
+  resolveDispute as resolveDisputeFlow,
+  overrideScore as overrideScoreFlow,
+} from "@/lib/matches/scoreFlow";
+import { applyCascadingAdvancement } from "@/lib/matches/advancement";
+import type { Match, MatchStage, MatchStatus, Team } from "@/types/domain";
 
 export interface AdminLoginState {
   error: string | null;
@@ -59,8 +73,9 @@ export interface PreviewBracketResult {
   authError?: string;
   fileError?: string;
   tournamentName: string;
-  teams: TeamDraft[];
-  matches: MatchDraft[];
+  teams: RosterTeamDraft[];
+  groupMatches: RoundRobinMatchDraft[];
+  groupSummaries: GroupSummary[];
   errors: ParseIssue[];
   warnings: ParseIssue[];
 }
@@ -71,7 +86,8 @@ export async function previewBracket(
   const empty: Omit<PreviewBracketResult, "authError" | "fileError"> = {
     tournamentName: "",
     teams: [],
-    matches: [],
+    groupMatches: [],
+    groupSummaries: [],
     errors: [],
     warnings: [],
   };
@@ -94,19 +110,51 @@ export async function previewBracket(
   const buffer = Buffer.from(await file.arrayBuffer());
   const result = parseBracket(buffer);
 
+  const groupSummaries = summarizeGroups(result.teams);
+  const warnings = [...result.warnings];
+  for (const g of groupSummaries) {
+    if (g.teamCount < 2) {
+      warnings.push({
+        row: 0,
+        message: `"${g.division}" 수준 "${g.group}" 조는 팀이 ${g.teamCount}개뿐이라 조별리그 경기가 생성되지 않습니다.`,
+      });
+    }
+  }
+
+  const groupsMap = new Map<string, RosterTeamDraft[]>();
+  for (const t of result.teams) {
+    const key = `${t.division}::${t.group}`;
+    const arr = groupsMap.get(key) ?? [];
+    arr.push(t);
+    groupsMap.set(key, arr);
+  }
+
+  const groupMatches: RoundRobinMatchDraft[] = [];
+  for (const teamsInGroup of groupsMap.values()) {
+    if (teamsInGroup.length === 0) continue;
+    const { division, group } = teamsInGroup[0]!;
+    groupMatches.push(
+      ...generateRoundRobinMatches(
+        division,
+        group,
+        teamsInGroup.map((t) => ({ key: t.key, teamName: t.teamName }))
+      )
+    );
+  }
+
   return {
     tournamentName,
     teams: result.teams,
-    matches: result.matches,
+    groupMatches,
+    groupSummaries,
     errors: result.errors,
-    warnings: result.warnings,
+    warnings,
   };
 }
 
 export interface CommitBracketPayload {
   tournamentName: string;
-  teams: TeamDraft[];
-  matches: MatchDraft[];
+  teams: RosterTeamDraft[];
 }
 
 export interface CommitBracketResult {
@@ -124,7 +172,7 @@ export async function commitBracket(
     return { authError: "관리자 인증이 필요합니다. 다시 로그인해주세요." };
   }
 
-  if (!payload.tournamentName || payload.matches.length === 0) {
+  if (!payload.tournamentName || payload.teams.length === 0) {
     return { authError: "업로드할 데이터가 없습니다. 미리보기를 먼저 진행해주세요." };
   }
 
@@ -176,6 +224,7 @@ export async function listTeams(): Promise<ListTeamsResult> {
 export interface ListMatchesFilters {
   division?: string;
   status?: MatchStatus;
+  stage?: MatchStage;
 }
 
 export interface ListMatchesResult {
@@ -206,11 +255,15 @@ export async function listMatches(
   if (filters.status) {
     matches = matches.filter((m) => m.status === filters.status);
   }
+  if (filters.stage) {
+    matches = matches.filter((m) => m.stage === filters.stage);
+  }
 
   matches.sort(
     (a, b) =>
       a.division.localeCompare(b.division) ||
-      a.round.localeCompare(b.round) ||
+      a.stage.localeCompare(b.stage) ||
+      (a.roundIndex ?? 0) - (b.roundIndex ?? 0) ||
       (a.order ?? 0) - (b.order ?? 0)
   );
 
@@ -239,11 +292,11 @@ export async function getAdminMatch(matchId: string): Promise<AdminMatchResult> 
   if (!match) return { authError: "경기를 찾을 수 없습니다." };
 
   const [teamASnap, teamBSnap] = await Promise.all([
-    teamDoc(tournament.id, match.teamAId).get(),
-    teamDoc(tournament.id, match.teamBId).get(),
+    match.teamAId ? teamDoc(tournament.id, match.teamAId).get() : Promise.resolve(null),
+    match.teamBId ? teamDoc(tournament.id, match.teamBId).get() : Promise.resolve(null),
   ]);
 
-  return { match, teamA: teamASnap.data(), teamB: teamBSnap.data() };
+  return { match, teamA: teamASnap?.data(), teamB: teamBSnap?.data() };
 }
 
 export interface ResolveDisputeState {
@@ -270,7 +323,168 @@ export async function resolveMatchDispute(
   if (!result.ok) return { error: result.error.message };
 
   await ref.update(result.patch);
+  await applyCascadingAdvancement(tournament.id, { ...match, ...result.patch });
   revalidatePath("/admin/matches");
   revalidatePath(`/admin/matches/${matchId}`);
+  revalidatePath("/admin/standings");
   return { error: null };
+}
+
+export async function overrideMatchScore(
+  matchId: string,
+  finalScoreA: number,
+  finalScoreB: number
+): Promise<ResolveDisputeState> {
+  const admin = await isAdminSession();
+  if (!admin) return { error: "관리자 인증이 필요합니다." };
+
+  const tournament = await getActiveTournament();
+  if (!tournament) return { error: "활성화된 대회가 없습니다." };
+
+  const ref = matchDoc(tournament.id, matchId);
+  const snap = await ref.get();
+  const match = snap.data();
+  if (!match) return { error: "경기를 찾을 수 없습니다." };
+
+  const result = overrideScoreFlow(match, finalScoreA, finalScoreB, Date.now());
+  if (!result.ok) return { error: result.error.message };
+
+  await ref.update(result.patch);
+  await applyCascadingAdvancement(tournament.id, { ...match, ...result.patch });
+  revalidatePath("/admin/matches");
+  revalidatePath(`/admin/matches/${matchId}`);
+  revalidatePath("/admin/standings");
+  return { error: null };
+}
+
+export interface GroupStandingsView {
+  group: string;
+  standings: TeamStanding[];
+  totalMatches: number;
+  confirmedMatches: number;
+  allConfirmed: boolean;
+}
+
+export interface DivisionStandingsResult {
+  authError?: string;
+  error?: string;
+  division: string;
+  divisions: string[];
+  groups: GroupStandingsView[];
+  knockoutGenerated: boolean;
+}
+
+export async function getDivisionStandings(division: string): Promise<DivisionStandingsResult> {
+  const admin = await isAdminSession();
+  if (!admin) {
+    return {
+      authError: "관리자 인증이 필요합니다.",
+      division,
+      divisions: [],
+      groups: [],
+      knockoutGenerated: false,
+    };
+  }
+
+  const tournament = await getActiveTournament();
+  if (!tournament) {
+    return { error: "활성화된 대회가 없습니다.", division, divisions: [], groups: [], knockoutGenerated: false };
+  }
+
+  const [teamsSnap, matchesSnap] = await Promise.all([
+    teamsCol(tournament.id).get(),
+    matchesCol(tournament.id).get(),
+  ]);
+
+  const allTeams = teamsSnap.docs.map((d) => d.data());
+  const teams = allTeams.filter((t) => t.division === division);
+  const allMatches = matchesSnap.docs.map((d) => d.data());
+  const divisionMatches = allMatches.filter((m) => m.division === division);
+  const groupMatches = divisionMatches.filter((m) => m.stage === "group");
+  const knockoutGenerated = divisionMatches.some((m) => m.stage === "knockout");
+
+  const standingsByGroup = computeGroupStandings(teams, groupMatches);
+
+  const groups: GroupStandingsView[] = Array.from(standingsByGroup.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([group, standings]) => {
+      const matchesInGroup = groupMatches.filter((m) => m.group === group);
+      const confirmedMatches = matchesInGroup.filter((m) => m.status === "confirmed").length;
+      return {
+        group,
+        standings,
+        totalMatches: matchesInGroup.length,
+        confirmedMatches,
+        allConfirmed: confirmedMatches === matchesInGroup.length,
+      };
+    });
+
+  return {
+    division,
+    divisions: Array.from(new Set(allTeams.map((t) => t.division))).sort(),
+    groups,
+    knockoutGenerated,
+  };
+}
+
+export interface GenerateBracketResult {
+  error?: string;
+  warnings?: string[];
+  matchCount?: number;
+}
+
+export async function generateKnockoutBracket(
+  division: string,
+  advanceCount: number
+): Promise<GenerateBracketResult> {
+  const admin = await isAdminSession();
+  if (!admin) return { error: "관리자 인증이 필요합니다." };
+
+  if (!Number.isInteger(advanceCount) || advanceCount < 1) {
+    return { error: "진출 인원수는 1 이상의 정수여야 합니다." };
+  }
+
+  const tournament = await getActiveTournament();
+  if (!tournament) return { error: "활성화된 대회가 없습니다." };
+
+  const matchesSnap = await matchesCol(tournament.id).get();
+  const allMatches = matchesSnap.docs.map((d) => d.data());
+  const divisionMatches = allMatches.filter((m) => m.division === division);
+
+  if (divisionMatches.some((m) => m.stage === "knockout")) {
+    return { error: "이미 이 수준의 토너먼트 대진이 생성되어 있습니다. 재생성은 지원하지 않습니다." };
+  }
+
+  const groupMatches = divisionMatches.filter((m) => m.stage === "group");
+  const unconfirmed = groupMatches.filter((m) => m.status !== "confirmed");
+  if (unconfirmed.length > 0) {
+    return {
+      error: `조별리그 경기 ${unconfirmed.length}건이 아직 확정되지 않았습니다. 모두 확정한 후 다시 시도해주세요.`,
+    };
+  }
+
+  const teamsSnap = await teamsCol(tournament.id).get();
+  const teams = teamsSnap.docs.map((d) => d.data()).filter((t) => t.division === division);
+  if (teams.length === 0) {
+    return { error: "이 수준에 등록된 팀이 없습니다." };
+  }
+
+  const standingsByGroup = computeGroupStandings(teams, groupMatches);
+  const seedsResult = buildSeedList(standingsByGroup, advanceCount);
+  if ("error" in seedsResult) return { error: seedsResult.error };
+
+  const bracketResult = buildKnockoutBracket(seedsResult);
+  if ("error" in bracketResult) return { error: bracketResult.error };
+
+  const { matchCount } = await commitKnockoutBracket(
+    tournament.id,
+    division,
+    bracketResult,
+    Date.now()
+  );
+
+  revalidatePath("/admin/standings");
+  revalidatePath("/admin/matches");
+
+  return { warnings: bracketResult.warnings, matchCount };
 }

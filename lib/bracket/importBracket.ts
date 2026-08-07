@@ -1,19 +1,19 @@
-import type { WriteBatch } from "firebase-admin/firestore";
-import { getDb } from "@/lib/firebase/admin";
 import { tournamentsCol, teamsCol, matchesCol } from "@/lib/firebase/collections";
-import type { MatchDraft, TeamDraft } from "./parseBracket";
+import { commitInChunks, type BatchOp } from "@/lib/firebase/batchWrite";
+import { generateRoundRobinMatches } from "./roundRobin";
+import type { RosterTeamDraft } from "./parseBracket";
 import type { Match, Team, Tournament } from "@/types/domain";
 
 export interface ImportBracketInput {
   tournamentName: string;
-  teams: TeamDraft[];
-  matches: MatchDraft[];
+  teams: RosterTeamDraft[];
 }
 
 export interface ImportedTeam {
   id: string;
   code: string;
   division: string;
+  group: string;
   teamName: string;
   player1: string;
   player2: string;
@@ -26,7 +26,6 @@ export interface ImportBracketResult {
 }
 
 const CODE_LENGTH = 4;
-const CHUNK_SIZE = 450; // stay under Firestore's 500 ops/batch limit
 
 function generateCode(used: Set<string>): string {
   let code: string;
@@ -40,23 +39,12 @@ function generateCode(used: Set<string>): string {
   return code;
 }
 
-type BatchOp = (batch: WriteBatch) => void;
-
-async function commitInChunks(ops: BatchOp[]): Promise<void> {
-  const db = getDb();
-  for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
-    const batch = db.batch();
-    for (const op of ops.slice(i, i + CHUNK_SIZE)) {
-      op(batch);
-    }
-    await batch.commit();
-  }
-}
-
 /**
- * Commits a parsed bracket to Firestore as a brand-new tournament, and
- * closes any previously active tournament so exactly one stays "active"
- * (and therefore reachable via team codes) at a time.
+ * Commits a parsed roster to Firestore as a brand-new tournament: creates a
+ * team doc per row, then auto-generates every round-robin match within each
+ * (division, group) pair. Closes any previously active tournament so
+ * exactly one stays "active" (and therefore reachable via team codes) at a
+ * time.
  */
 export async function importBracket(
   input: ImportBracketInput
@@ -71,19 +59,20 @@ export async function importBracket(
 
   const ops: BatchOp[] = [];
 
-  const teamRefs = new Map<string, { id: string; code: string }>();
+  const teamRefs = new Map<string, { id: string; name: string; code: string }>();
   const importedTeams: ImportedTeam[] = [];
 
   for (const draft of input.teams) {
     const ref = teamsCol(tournamentId).doc();
     const code = generateCode(usedCodes);
-    teamRefs.set(draft.key, { id: ref.id, code });
+    teamRefs.set(draft.key, { id: ref.id, name: draft.teamName, code });
 
     const team: Team = {
       id: ref.id,
       tournamentId,
       code,
       division: draft.division,
+      group: draft.group,
       teamName: draft.teamName,
       player1: draft.player1,
       player2: draft.player2,
@@ -94,44 +83,69 @@ export async function importBracket(
       id: ref.id,
       code,
       division: draft.division,
+      group: draft.group,
       teamName: draft.teamName,
       player1: draft.player1,
       player2: draft.player2,
     });
   }
 
-  let matchCount = 0;
-  for (const draft of input.matches) {
-    const teamA = teamRefs.get(draft.teamAKey);
-    const teamB = teamRefs.get(draft.teamBKey);
-    if (!teamA || !teamB) continue; // defensive: should not happen if drafts are consistent
+  // Group teams by (division, group) and auto-generate round-robin matches.
+  const groups = new Map<string, { division: string; group: string; refs: RRRef[] }>();
+  for (const draft of input.teams) {
+    const groupKey = `${draft.division}::${draft.group}`;
+    const ref = teamRefs.get(draft.key)!;
+    const entry = groups.get(groupKey) ?? { division: draft.division, group: draft.group, refs: [] };
+    entry.refs.push({ key: draft.key, teamName: draft.teamName, id: ref.id });
+    groups.set(groupKey, entry);
+  }
 
-    const ref = matchesCol(tournamentId).doc();
-    const match: Match = {
-      id: ref.id,
-      tournamentId,
-      division: draft.division,
-      round: draft.round,
-      order: draft.order,
-      court: draft.court,
-      teamAId: teamA.id,
-      teamBId: teamB.id,
-      teamAName: draft.teamAName,
-      teamBName: draft.teamBName,
-      scoreA: null,
-      scoreB: null,
-      status: "pending",
-      submittedBy: null,
-      submittedScoreA: null,
-      submittedScoreB: null,
-      opponentScoreA: null,
-      opponentScoreB: null,
-      resolvedBy: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    ops.push((batch) => batch.set(ref, match));
-    matchCount += 1;
+  let matchCount = 0;
+  for (const { division, group, refs } of groups.values()) {
+    const matchDrafts = generateRoundRobinMatches(
+      division,
+      group,
+      refs.map((r) => ({ key: r.key, teamName: r.teamName }))
+    );
+
+    for (const draft of matchDrafts) {
+      const teamA = teamRefs.get(draft.teamAKey);
+      const teamB = teamRefs.get(draft.teamBKey);
+      if (!teamA || !teamB) continue; // defensive: should not happen if drafts are consistent
+
+      const ref = matchesCol(tournamentId).doc();
+      const match: Match = {
+        id: ref.id,
+        tournamentId,
+        division: draft.division,
+        stage: "group",
+        group: draft.group,
+        round: draft.round,
+        roundIndex: draft.roundIndex,
+        order: draft.order,
+        court: null,
+        teamAId: teamA.id,
+        teamBId: teamB.id,
+        teamAName: draft.teamAName,
+        teamBName: draft.teamBName,
+        scoreA: null,
+        scoreB: null,
+        status: "pending",
+        submittedBy: null,
+        submittedScoreA: null,
+        submittedScoreB: null,
+        opponentScoreA: null,
+        opponentScoreB: null,
+        resolvedBy: null,
+        isBye: false,
+        nextMatchId: null,
+        nextMatchSlot: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      ops.push((batch) => batch.set(ref, match));
+      matchCount += 1;
+    }
   }
 
   const divisions = Array.from(new Set(input.teams.map((t) => t.division))).sort();
@@ -152,4 +166,10 @@ export async function importBracket(
   await commitInChunks(ops);
 
   return { tournamentId, teams: importedTeams, matchCount };
+}
+
+interface RRRef {
+  key: string;
+  teamName: string;
+  id: string;
 }

@@ -1,7 +1,7 @@
 import type { Match, MatchSide } from "@/types/domain";
 
 export interface ScoreFlowError {
-  code: "invalid_score" | "wrong_state" | "own_submission";
+  code: "invalid_score" | "wrong_state" | "own_submission" | "opponent_tbd";
   message: string;
 }
 
@@ -46,6 +46,16 @@ export function submitScore(
       error: {
         code: "wrong_state",
         message: "이미 점수가 제출된 경기입니다.",
+      },
+    };
+  }
+
+  if (match.isBye || match.teamAId === null || match.teamBId === null) {
+    return {
+      ok: false,
+      error: {
+        code: "opponent_tbd",
+        message: "상대팀이 아직 결정되지 않았습니다.",
       },
     };
   }
@@ -156,6 +166,45 @@ export function resolveDispute(
       error: {
         code: "wrong_state",
         message: "분쟁 상태의 경기가 아닙니다.",
+      },
+    };
+  }
+
+  const invalid = validateScores(finalScoreA, finalScoreB);
+  if (invalid) return { ok: false, error: invalid };
+
+  return {
+    ok: true,
+    patch: {
+      status: "confirmed",
+      scoreA: finalScoreA,
+      scoreB: finalScoreB,
+      resolvedBy: "admin",
+      updatedAt: now,
+    },
+  };
+}
+
+/**
+ * Admin force-sets a final score regardless of the match's current state
+ * (pending, awaiting_confirmation, disputed, even already confirmed) — for
+ * no-show/forfeit group-stage matches that would otherwise block knockout
+ * bracket generation. Deliberately separate from `resolveDispute`, which
+ * stays restricted to the "disputed" precondition as a safety rail; this
+ * function is exposed through its own, distinctly-labeled admin control.
+ */
+export function overrideScore(
+  match: Match,
+  finalScoreA: number,
+  finalScoreB: number,
+  now: number
+): ScoreFlowResult {
+  if (match.isBye || match.teamAId === null || match.teamBId === null) {
+    return {
+      ok: false,
+      error: {
+        code: "opponent_tbd",
+        message: "상대팀이 아직 결정되지 않았습니다.",
       },
     };
   }

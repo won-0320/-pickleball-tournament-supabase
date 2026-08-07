@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import type { Match, MatchStatus } from "@/types/domain";
+import type { Match, MatchStage, MatchStatus } from "@/types/domain";
 import { STATUS_BADGE_CLASSES, STATUS_LABELS } from "@/lib/matches/statusLabels";
 
 const STATUS_OPTIONS: MatchStatus[] = [
@@ -12,8 +12,14 @@ const STATUS_OPTIONS: MatchStatus[] = [
   "disputed",
 ];
 
+const STAGE_LABELS: Record<MatchStage, string> = {
+  group: "조별리그",
+  knockout: "토너먼트",
+};
+
 export default function MatchesDashboard({ matches }: { matches: Match[] }) {
   const [division, setDivision] = useState("all");
+  const [stage, setStage] = useState<"all" | MatchStage>("all");
   const [round, setRound] = useState("all");
   const [status, setStatus] = useState<"all" | MatchStatus>("all");
 
@@ -28,6 +34,7 @@ export default function MatchesDashboard({ matches }: { matches: Match[] }) {
 
   const filtered = matches.filter((m) => {
     if (division !== "all" && m.division !== division) return false;
+    if (stage !== "all" && m.stage !== stage) return false;
     if (round !== "all" && m.round !== round) return false;
     if (status !== "all" && m.status !== status) return false;
     return true;
@@ -47,6 +54,15 @@ export default function MatchesDashboard({ matches }: { matches: Match[] }) {
               {d}
             </option>
           ))}
+        </select>
+        <select
+          value={stage}
+          onChange={(e) => setStage(e.target.value as "all" | MatchStage)}
+          className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+        >
+          <option value="all">전체 단계</option>
+          <option value="group">조별리그</option>
+          <option value="knockout">토너먼트</option>
         </select>
         <select
           value={round}
@@ -82,8 +98,9 @@ export default function MatchesDashboard({ matches }: { matches: Match[] }) {
           <thead className="bg-neutral-100 text-neutral-600">
             <tr>
               <th className="px-3 py-2">수준</th>
+              <th className="px-3 py-2">단계</th>
+              <th className="px-3 py-2">조</th>
               <th className="px-3 py-2">라운드</th>
-              <th className="px-3 py-2">코트</th>
               <th className="px-3 py-2">팀A</th>
               <th className="px-3 py-2">팀B</th>
               <th className="px-3 py-2">점수</th>
@@ -94,28 +111,38 @@ export default function MatchesDashboard({ matches }: { matches: Match[] }) {
             {filtered.map((m) => (
               <tr key={m.id} className="border-t border-neutral-200">
                 <td className="px-3 py-2">{m.division}</td>
+                <td className="px-3 py-2">{STAGE_LABELS[m.stage]}</td>
+                <td className="px-3 py-2">{m.group ?? "-"}</td>
                 <td className="px-3 py-2">{m.round}</td>
-                <td className="px-3 py-2">{m.court ?? "-"}</td>
-                <td className="px-3 py-2">{m.teamAName}</td>
-                <td className="px-3 py-2">{m.teamBName}</td>
+                <td className="px-3 py-2">{m.teamAName ?? "상대 미정"}</td>
+                <td className="px-3 py-2">{m.teamBName ?? (m.isBye ? "부전승" : "상대 미정")}</td>
                 <td className="px-3 py-2">
                   {m.scoreA !== null && m.scoreB !== null
                     ? `${m.scoreA} : ${m.scoreB}`
                     : "-"}
                 </td>
                 <td className="px-3 py-2">
-                  <Link
-                    href={`/admin/matches/${m.id}`}
-                    className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${STATUS_BADGE_CLASSES[m.status]}`}
-                  >
-                    {STATUS_LABELS[m.status]}
-                  </Link>
+                  {m.isBye ? (
+                    <Link
+                      href={`/admin/matches/${m.id}`}
+                      className="inline-block rounded-full bg-sky-100 px-2 py-1 text-xs font-medium text-sky-700"
+                    >
+                      부전승
+                    </Link>
+                  ) : (
+                    <Link
+                      href={`/admin/matches/${m.id}`}
+                      className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${STATUS_BADGE_CLASSES[m.status]}`}
+                    >
+                      {STATUS_LABELS[m.status]}
+                    </Link>
+                  )}
                 </td>
               </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-neutral-400">
+                <td colSpan={8} className="px-3 py-6 text-center text-neutral-400">
                   표시할 경기가 없습니다.
                 </td>
               </tr>

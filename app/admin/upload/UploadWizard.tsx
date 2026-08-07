@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import {
   previewBracket,
@@ -17,15 +17,6 @@ export default function UploadWizard() {
   const [result, setResult] = useState<CommitBracketResult | null>(null);
   const [pending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-
-  const teamCountByDivision = useMemo(() => {
-    if (!preview) return [];
-    const counts = new Map<string, number>();
-    for (const team of preview.teams) {
-      counts.set(team.division, (counts.get(team.division) ?? 0) + 1);
-    }
-    return Array.from(counts.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [preview]);
 
   function handlePreviewSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -45,7 +36,6 @@ export default function UploadWizard() {
       const res = await commitBracket({
         tournamentName: preview.tournamentName,
         teams: preview.teams,
-        matches: preview.matches,
       });
       setResult(res);
       if (!res.authError) {
@@ -66,8 +56,10 @@ export default function UploadWizard() {
       <div className="flex flex-col gap-4">
         <p className="text-base text-neutral-800">
           대회 &quot;{preview?.tournamentName}&quot;가 생성되었습니다. 팀{" "}
-          {result.teams?.length ?? 0}개, 경기 {result.matchCount ?? 0}개가
-          등록되었습니다. 이전에 활성화되어 있던 대회는 자동으로 종료 처리됩니다.
+          {result.teams?.length ?? 0}개, 조별리그 경기 {result.matchCount ?? 0}
+          건이 자동 생성되었습니다. 이전에 활성화되어 있던 대회는 자동으로 종료
+          처리됩니다. 조별리그가 끝나면 &quot;그룹 순위·대진 생성&quot; 화면에서
+          토너먼트 대진을 만들 수 있습니다.
         </p>
         <div className="flex gap-3">
           <Link
@@ -96,12 +88,13 @@ export default function UploadWizard() {
             미리보기: {preview.tournamentName}
           </h2>
           <p className="mt-1 text-sm text-neutral-600">
-            팀 {preview.teams.length}개 / 경기 {preview.matches.length}개
+            팀 {preview.teams.length}개 / 조별리그 경기{" "}
+            {preview.groupMatches.length}건 (자동 생성)
           </p>
           <ul className="mt-2 text-sm text-neutral-600">
-            {teamCountByDivision.map(([division, count]) => (
-              <li key={division}>
-                수준 {division}: {count}팀
+            {preview.groupSummaries.map((g) => (
+              <li key={`${g.division}::${g.group}`}>
+                수준 {g.division} · {g.group}조: {g.teamCount}팀, {g.matchCount}경기
               </li>
             ))}
           </ul>
@@ -129,7 +122,8 @@ export default function UploadWizard() {
             <ul className="list-disc space-y-1 pl-5 text-sm text-amber-700">
               {preview.warnings.map((warn, i) => (
                 <li key={i}>
-                  {warn.row}행: {warn.message}
+                  {warn.row > 0 ? `${warn.row}행: ` : ""}
+                  {warn.message}
                 </li>
               ))}
             </ul>
@@ -141,15 +135,17 @@ export default function UploadWizard() {
             <thead className="bg-neutral-100 text-neutral-600">
               <tr>
                 <th className="px-3 py-2">수준</th>
+                <th className="px-3 py-2">조</th>
                 <th className="px-3 py-2">라운드</th>
                 <th className="px-3 py-2">팀A</th>
                 <th className="px-3 py-2">팀B</th>
               </tr>
             </thead>
             <tbody>
-              {preview.matches.map((m, i) => (
+              {preview.groupMatches.map((m, i) => (
                 <tr key={i} className="border-t border-neutral-200">
                   <td className="px-3 py-2">{m.division}</td>
+                  <td className="px-3 py-2">{m.group}</td>
                   <td className="px-3 py-2">{m.round}</td>
                   <td className="px-3 py-2">{m.teamAName}</td>
                   <td className="px-3 py-2">{m.teamBName}</td>
@@ -200,7 +196,7 @@ export default function UploadWizard() {
 
       <div className="flex flex-col gap-2">
         <label htmlFor="file" className="text-sm font-medium text-neutral-700">
-          대진표 파일 (.xlsx, .csv)
+          팀 명단 파일 (.xlsx, .csv)
         </label>
         <input
           id="file"
@@ -211,8 +207,8 @@ export default function UploadWizard() {
           className="rounded-lg border border-neutral-300 px-4 py-3 text-base"
         />
         <p className="text-xs text-neutral-500">
-          필수 컬럼: 수준, 라운드, 팀A명, A선수1, A선수2, 팀B명, B선수1, B선수2
-          (코트, 경기순서는 선택)
+          필수 컬럼: 수준, 조, 팀명, 선수1, 선수2 — 한 행 = 팀 1개. 각 조의
+          조별리그 경기는 앱이 자동으로 생성합니다.
         </p>
       </div>
 

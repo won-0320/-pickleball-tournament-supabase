@@ -1,0 +1,50 @@
+import { buildSeedList } from "@/lib/bracket/seeding";
+import { buildKnockoutBracket } from "@/lib/bracket/knockoutBracket";
+import { commitKnockoutBracket } from "@/lib/bracket/commitKnockoutBracket";
+import { computeGroupStandings } from "@/lib/standings/standings";
+import { teamsCol, matchesCol } from "@/lib/firebase/collections";
+
+const ADVANCE_COUNT = 2; // 고정: 조 1·2위 진출
+
+export interface AutoGenerateKnockoutResult {
+  generated: boolean;
+  matchCount?: number;
+}
+
+/**
+ * generateKnockoutBracket(관리자 수동, 상세 에러 반환)과 로직은 거의 같지만,
+ * 조별리그 마지막 경기가 확정되는 순간 자동으로 호출되므로 에러를 절대
+ * 사용자에게 노출하지 않고 항상 조용히 실패한다. 관리자 수동 버튼과는
+ * 의도적으로 분리되어 있으며 공유 리팩터링하지 않는다.
+ */
+export async function autoGenerateKnockoutBracket(
+  tournamentId: string,
+  division: string
+): Promise<AutoGenerateKnockoutResult> {
+  try {
+    const matchesSnap = await matchesCol(tournamentId).get();
+    const divisionMatches = matchesSnap.docs.map((d) => d.data()).filter((m) => m.division === division);
+
+    if (divisionMatches.some((m) => m.stage === "knockout")) return { generated: false }; // 이미 생성됨 (멱등성)
+
+    const groupMatches = divisionMatches.filter((m) => m.stage === "group");
+    if (groupMatches.length === 0) return { generated: false };
+    if (groupMatches.some((m) => m.status !== "confirmed")) return { generated: false }; // 아직 다 안 끝남
+
+    const teamsSnap = await teamsCol(tournamentId).get();
+    const teams = teamsSnap.docs.map((d) => d.data()).filter((t) => t.division === division);
+    if (teams.length === 0) return { generated: false };
+
+    const standingsByGroup = computeGroupStandings(teams, groupMatches);
+    const seedsResult = buildSeedList(standingsByGroup, ADVANCE_COUNT);
+    if ("error" in seedsResult) return { generated: false }; // 예: 한 조에 팀이 2개 미만
+
+    const bracketResult = buildKnockoutBracket(seedsResult);
+    if ("error" in bracketResult) return { generated: false };
+
+    const { matchCount } = await commitKnockoutBracket(tournamentId, division, bracketResult, Date.now());
+    return { generated: true, matchCount };
+  } catch {
+    return { generated: false }; // 관계없는 경기를 확정한 팀에게 에러를 노출하지 않음
+  }
+}

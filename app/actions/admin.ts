@@ -38,6 +38,7 @@ import {
   overrideScore as overrideScoreFlow,
 } from "@/lib/matches/scoreFlow";
 import { applyCascadingAdvancement } from "@/lib/matches/advancement";
+import { autoGenerateKnockoutBracket } from "@/lib/bracket/autoGenerateKnockout";
 import type { Match, MatchStage, MatchStatus, Team, TournamentStatus } from "@/types/domain";
 
 export interface AdminLoginState {
@@ -336,6 +337,9 @@ export async function resolveMatchDispute(
 
   await ref.update(result.patch);
   await applyCascadingAdvancement(tournament.id, { ...match, ...result.patch });
+  if (match.stage === "group") {
+    await autoGenerateKnockoutBracket(tournament.id, match.division);
+  }
   revalidatePath("/admin/matches");
   revalidatePath(`/admin/matches/${matchId}`);
   revalidatePath("/admin/standings");
@@ -363,6 +367,9 @@ export async function overrideMatchScore(
 
   await ref.update(result.patch);
   await applyCascadingAdvancement(tournament.id, { ...match, ...result.patch });
+  if (match.stage === "group") {
+    await autoGenerateKnockoutBracket(tournament.id, match.division);
+  }
   revalidatePath("/admin/matches");
   revalidatePath(`/admin/matches/${matchId}`);
   revalidatePath("/admin/standings");

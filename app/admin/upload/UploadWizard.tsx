@@ -207,8 +207,9 @@ export default function UploadWizard() {
           className="rounded-lg border border-neutral-300 px-4 py-3 text-base"
         />
         <p className="text-xs text-neutral-500">
-          필수 컬럼: 부문, 조, 팀명, 선수1, 선수2 — 한 행 = 팀 1개. 각 조의
-          조별리그 경기는 앱이 자동으로 생성합니다.
+          필수 컬럼: 부문, 조, 선수1, 선수2 — 한 행 = 팀 1개(팀명은 별도
+          입력 없이 두 선수 이름으로 자동 생성됩니다). 각 조의 조별리그
+          경기는 앱이 자동으로 생성합니다.
         </p>
       </div>
 

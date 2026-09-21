@@ -19,14 +19,12 @@ export default function AddTeamForm({
 
   const [division, setDivision] = useState("");
   const [group, setGroup] = useState("");
-  const [teamName, setTeamName] = useState("");
   const [player1, setPlayer1] = useState("");
   const [player2, setPlayer2] = useState("");
 
   function resetFields() {
     setDivision("");
     setGroup("");
-    setTeamName("");
     setPlayer1("");
     setPlayer2("");
   }
@@ -36,7 +34,7 @@ export default function AddTeamForm({
     setError(null);
     setSuccessCode(null);
     startTransition(async () => {
-      const res = await addTeam({ division, group, teamName, player1, player2 });
+      const res = await addTeam({ division, group, player1, player2 });
       if (res.error) {
         setError(res.error);
         return;
@@ -105,16 +103,6 @@ export default function AddTeamForm({
             ))}
           </datalist>
         </div>
-      </div>
-
-      <div className="flex flex-col gap-1">
-        <label className="text-xs text-neutral-500">팀명</label>
-        <input
-          value={teamName}
-          onChange={(e) => setTeamName(e.target.value)}
-          required
-          className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-        />
       </div>
 
       <div className="grid grid-cols-2 gap-3">

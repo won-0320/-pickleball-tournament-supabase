@@ -9,7 +9,7 @@ import {
   isAdminSession,
 } from "@/lib/session/adminSession";
 import { parseBracket, type ParseIssue, type RosterTeamDraft } from "@/lib/bracket/parseBracket";
-import { teamKey } from "@/lib/bracket/teamKey";
+import { teamKey, deriveTeamName } from "@/lib/bracket/teamKey";
 import { importBracket, type ImportedTeam } from "@/lib/bracket/importBracket";
 import {
   generateRoundRobinMatches,
@@ -568,7 +568,6 @@ export async function deleteTournament(tournamentId: string): Promise<DeleteTour
 export interface AddTeamInput {
   division: string;
   group: string;
-  teamName: string;
   player1: string;
   player2: string;
 }
@@ -599,13 +598,14 @@ export async function addTeam(input: AddTeamInput): Promise<AddTeamResult> {
 
   const division = input.division.trim();
   const group = input.group.trim();
-  const teamName = input.teamName.trim();
   const player1 = input.player1.trim();
   const player2 = input.player2.trim();
 
-  if (!division || !group || !teamName || !player1 || !player2) {
+  if (!division || !group || !player1 || !player2) {
     return { error: "모든 항목을 입력해주세요." };
   }
+
+  const teamName = deriveTeamName(player1, player2);
 
   const tournament = await getActiveTournament();
   if (!tournament) return { error: "활성화된 대회가 없습니다." };

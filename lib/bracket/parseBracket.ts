@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { teamKey } from "./teamKey";
+import { teamKey, deriveTeamName } from "./teamKey";
 
 export interface RosterTeamDraft {
   key: string; // `${division}::${group}::${normalizedTeamName}`
@@ -21,7 +21,7 @@ export interface ParseRosterResult {
   warnings: ParseIssue[];
 }
 
-const REQUIRED_HEADERS = ["부문", "조", "팀명", "선수1", "선수2"] as const;
+const REQUIRED_HEADERS = ["부문", "조", "선수1", "선수2"] as const;
 
 type RawRow = Record<string, unknown>;
 
@@ -79,14 +79,12 @@ export function parseBracket(buffer: Buffer): ParseRosterResult {
 
     const division = cell(row, "부문");
     const group = cell(row, "조");
-    const teamName = cell(row, "팀명");
     const player1 = cell(row, "선수1");
     const player2 = cell(row, "선수2");
 
     const missingFields: string[] = [];
     if (!division) missingFields.push("부문");
     if (!group) missingFields.push("조");
-    if (!teamName) missingFields.push("팀명");
     if (!player1) missingFields.push("선수1");
     if (!player2) missingFields.push("선수2");
 
@@ -98,11 +96,12 @@ export function parseBracket(buffer: Buffer): ParseRosterResult {
       return;
     }
 
+    const teamName = deriveTeamName(player1, player2);
     const key = teamKey(division, group, teamName);
     if (seenKeys.has(key)) {
       errors.push({
         row: rowNumber,
-        message: `"${teamName}" 팀이 같은 조(${group}, 부문 ${division})에 중복 등록되어 있습니다.`,
+        message: `"${player1}, ${player2}" 팀이 같은 조(${group}, 부문 ${division})에 중복 등록되어 있습니다.`,
       });
       return;
     }

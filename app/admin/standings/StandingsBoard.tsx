@@ -60,7 +60,7 @@ export default function StandingsBoard({
               d === division ? "bg-neutral-900 text-white" : "border border-neutral-300 text-neutral-600"
             }`}
           >
-            수준 {d}
+            부문 {d}
           </button>
         ))}
       </div>
@@ -103,13 +103,13 @@ export default function StandingsBoard({
       ))}
 
       {data.groups.length === 0 && !data.error && (
-        <p className="text-sm text-neutral-400">이 수준에는 조가 없습니다.</p>
+        <p className="text-sm text-neutral-400">이 부문에는 조가 없습니다.</p>
       )}
 
       <div className="rounded-lg border border-neutral-200 p-4">
         {data.knockoutGenerated ? (
           <p className="text-sm text-emerald-700">
-            이미 이 수준의 토너먼트 대진이 생성되었습니다. 경기 현황에서 확인하세요.
+            이미 이 부문의 토너먼트 대진이 생성되었습니다. 경기 현황에서 확인하세요.
           </p>
         ) : (
           <div className="flex flex-col gap-3">

@@ -6,7 +6,7 @@ export default function Home() {
       <div className="text-center">
         <h1 className="text-2xl font-bold text-neutral-900">피클볼 대회</h1>
         <p className="mt-2 text-sm text-neutral-500">
-          수준별 복식 대회 경기 결과 기록
+          부문별 복식 대회 경기 결과 기록
         </p>
       </div>
 

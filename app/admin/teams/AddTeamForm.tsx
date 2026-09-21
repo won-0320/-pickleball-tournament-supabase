@@ -76,7 +76,7 @@ export default function AddTeamForm({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-neutral-500">수준</label>
+          <label className="text-xs text-neutral-500">부문</label>
           <input
             list="existing-divisions"
             value={division}

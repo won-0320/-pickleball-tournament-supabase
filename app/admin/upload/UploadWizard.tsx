@@ -94,7 +94,7 @@ export default function UploadWizard() {
           <ul className="mt-2 text-sm text-neutral-600">
             {preview.groupSummaries.map((g) => (
               <li key={`${g.division}::${g.group}`}>
-                수준 {g.division} · {g.group}조: {g.teamCount}팀, {g.matchCount}경기
+                부문 {g.division} · {g.group}조: {g.teamCount}팀, {g.matchCount}경기
               </li>
             ))}
           </ul>
@@ -134,7 +134,7 @@ export default function UploadWizard() {
           <table className="w-full text-left text-sm">
             <thead className="bg-neutral-100 text-neutral-600">
               <tr>
-                <th className="px-3 py-2">수준</th>
+                <th className="px-3 py-2">부문</th>
                 <th className="px-3 py-2">조</th>
                 <th className="px-3 py-2">라운드</th>
                 <th className="px-3 py-2">팀A</th>
@@ -207,7 +207,7 @@ export default function UploadWizard() {
           className="rounded-lg border border-neutral-300 px-4 py-3 text-base"
         />
         <p className="text-xs text-neutral-500">
-          필수 컬럼: 수준, 조, 팀명, 선수1, 선수2 — 한 행 = 팀 1개. 각 조의
+          필수 컬럼: 부문, 조, 팀명, 선수1, 선수2 — 한 행 = 팀 1개. 각 조의
           조별리그 경기는 앱이 자동으로 생성합니다.
         </p>
       </div>

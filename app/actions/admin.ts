@@ -128,7 +128,7 @@ export async function previewBracket(
     if (g.teamCount < 2) {
       warnings.push({
         row: 0,
-        message: `"${g.division}" 수준 "${g.group}" 조는 팀이 ${g.teamCount}개뿐이라 조별리그 경기가 생성되지 않습니다.`,
+        message: `"${g.division}" 부문 "${g.group}" 조는 팀이 ${g.teamCount}개뿐이라 조별리그 경기가 생성되지 않습니다.`,
       });
     }
   }
@@ -464,7 +464,7 @@ export async function generateKnockoutBracket(
   const divisionMatches = allMatches.filter((m) => m.division === division);
 
   if (divisionMatches.some((m) => m.stage === "knockout")) {
-    return { error: "이미 이 수준의 토너먼트 대진이 생성되어 있습니다. 재생성은 지원하지 않습니다." };
+    return { error: "이미 이 부문의 토너먼트 대진이 생성되어 있습니다. 재생성은 지원하지 않습니다." };
   }
 
   const groupMatches = divisionMatches.filter((m) => m.stage === "group");
@@ -478,7 +478,7 @@ export async function generateKnockoutBracket(
   const teamsSnap = await teamsCol(tournament.id).get();
   const teams = teamsSnap.docs.map((d) => d.data()).filter((t) => t.division === division);
   if (teams.length === 0) {
-    return { error: "이 수준에 등록된 팀이 없습니다." };
+    return { error: "이 부문에 등록된 팀이 없습니다." };
   }
 
   const standingsByGroup = computeGroupStandings(teams, groupMatches);
@@ -614,7 +614,7 @@ export async function addTeam(input: AddTeamInput): Promise<AddTeamResult> {
     (m) => m.division === division && m.stage === "knockout"
   );
   if (knockoutAlready) {
-    return { error: "토너먼트가 이미 생성된 수준에는 팀을 추가할 수 없습니다." };
+    return { error: "토너먼트가 이미 생성된 부문에는 팀을 추가할 수 없습니다." };
   }
 
   const newKey = teamKey(division, group, teamName);

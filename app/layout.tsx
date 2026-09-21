@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "피클볼 대회",
-  description: "수준별 복식 피클볼 대회 경기 결과 기록",
+  description: "부문별 복식 피클볼 대회 경기 결과 기록",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

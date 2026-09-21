@@ -37,7 +37,7 @@ export default async function TeamMatchesPage({
       <PollOnInterval intervalMs={6000} />
       <div className="mx-auto max-w-md">
         <div className="mb-6">
-          <p className="text-sm text-neutral-500">수준 {team.division} · {team.group}조</p>
+          <p className="text-sm text-neutral-500">부문 {team.division} · {team.group}조</p>
           <h1 className="text-2xl font-bold text-neutral-900">{team.teamName}</h1>
           <p className="text-sm text-neutral-600">
             {team.player1} / {team.player2}

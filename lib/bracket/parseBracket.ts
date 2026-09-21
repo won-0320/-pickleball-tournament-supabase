@@ -21,7 +21,7 @@ export interface ParseRosterResult {
   warnings: ParseIssue[];
 }
 
-const REQUIRED_HEADERS = ["수준", "조", "팀명", "선수1", "선수2"] as const;
+const REQUIRED_HEADERS = ["부문", "조", "팀명", "선수1", "선수2"] as const;
 
 type RawRow = Record<string, unknown>;
 
@@ -77,14 +77,14 @@ export function parseBracket(buffer: Buffer): ParseRosterResult {
   rows.forEach((row, index) => {
     const rowNumber = index + 2; // header is row 1
 
-    const division = cell(row, "수준");
+    const division = cell(row, "부문");
     const group = cell(row, "조");
     const teamName = cell(row, "팀명");
     const player1 = cell(row, "선수1");
     const player2 = cell(row, "선수2");
 
     const missingFields: string[] = [];
-    if (!division) missingFields.push("수준");
+    if (!division) missingFields.push("부문");
     if (!group) missingFields.push("조");
     if (!teamName) missingFields.push("팀명");
     if (!player1) missingFields.push("선수1");
@@ -102,7 +102,7 @@ export function parseBracket(buffer: Buffer): ParseRosterResult {
     if (seenKeys.has(key)) {
       errors.push({
         row: rowNumber,
-        message: `"${teamName}" 팀이 같은 조(${group}, 수준 ${division})에 중복 등록되어 있습니다.`,
+        message: `"${teamName}" 팀이 같은 조(${group}, 부문 ${division})에 중복 등록되어 있습니다.`,
       });
       return;
     }

@@ -48,7 +48,7 @@ export default function MatchesDashboard({ matches }: { matches: Match[] }) {
           onChange={(e) => setDivision(e.target.value)}
           className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
         >
-          <option value="all">전체 수준</option>
+          <option value="all">전체 부문</option>
           {divisions.map((d) => (
             <option key={d} value={d}>
               {d}
@@ -97,7 +97,7 @@ export default function MatchesDashboard({ matches }: { matches: Match[] }) {
         <table className="w-full text-left text-sm">
           <thead className="bg-neutral-100 text-neutral-600">
             <tr>
-              <th className="px-3 py-2">수준</th>
+              <th className="px-3 py-2">부문</th>
               <th className="px-3 py-2">단계</th>
               <th className="px-3 py-2">조</th>
               <th className="px-3 py-2">라운드</th>

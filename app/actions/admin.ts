@@ -48,8 +48,8 @@ export async function adminLogin(
   _prevState: AdminLoginState,
   formData: FormData
 ): Promise<AdminLoginState> {
-  const password = String(formData.get("password") ?? "");
-  const expected = process.env.ADMIN_PASSWORD ?? "";
+  const password = String(formData.get("password") ?? "").trim();
+  const expected = (process.env.ADMIN_PASSWORD ?? "").trim();
 
   if (!expected) {
     return { error: "서버에 ADMIN_PASSWORD가 설정되어 있지 않습니다." };

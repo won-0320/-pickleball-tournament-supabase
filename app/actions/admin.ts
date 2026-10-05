@@ -18,8 +18,7 @@ import {
   type GroupSummary,
   type RoundRobinMatchDraft,
 } from "@/lib/bracket/roundRobin";
-import { buildSeedList } from "@/lib/bracket/seeding";
-import { buildKnockoutBracket } from "@/lib/bracket/knockoutBracket";
+import { buildDivisionKnockout } from "@/lib/bracket/divisionKnockout";
 import { commitKnockoutBracket } from "@/lib/bracket/commitKnockoutBracket";
 import { computeGroupStandings, type TeamStanding } from "@/lib/standings/standings";
 import { getDb } from "@/lib/firebase/admin";
@@ -432,7 +431,7 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
   const knockoutGenerated = divisionMatches.some((m) => m.stage === "knockout");
   const isLeague = tournament.leagueDivisions?.includes(division) ?? false;
 
-  const standingsByGroup = computeGroupStandings(teams, groupMatches, isLeague ? "league" : "default");
+  const standingsByGroup = computeGroupStandings(teams, groupMatches);
 
   const groups: GroupStandingsView[] = Array.from(standingsByGroup.entries())
     .sort(([a], [b]) => a.localeCompare(b))
@@ -540,10 +539,7 @@ export async function generateKnockoutBracket(
   }
 
   const standingsByGroup = computeGroupStandings(teams, groupMatches);
-  const seedsResult = buildSeedList(standingsByGroup, advanceCount);
-  if ("error" in seedsResult) return { error: seedsResult.error };
-
-  const bracketResult = buildKnockoutBracket(seedsResult);
+  const bracketResult = buildDivisionKnockout(standingsByGroup, advanceCount);
   if ("error" in bracketResult) return { error: bracketResult.error };
 
   const { matchCount } = await commitKnockoutBracket(

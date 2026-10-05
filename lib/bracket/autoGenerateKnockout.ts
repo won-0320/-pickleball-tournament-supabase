@@ -1,5 +1,4 @@
-import { buildSeedList } from "@/lib/bracket/seeding";
-import { buildKnockoutBracket } from "@/lib/bracket/knockoutBracket";
+import { buildDivisionKnockout } from "@/lib/bracket/divisionKnockout";
 import { commitKnockoutBracket } from "@/lib/bracket/commitKnockoutBracket";
 import { computeGroupStandings } from "@/lib/standings/standings";
 import { tournamentDoc, teamsCol, matchesCol } from "@/lib/firebase/collections";
@@ -39,11 +38,8 @@ export async function autoGenerateKnockoutBracket(
     if (teams.length === 0) return { generated: false };
 
     const standingsByGroup = computeGroupStandings(teams, groupMatches);
-    const seedsResult = buildSeedList(standingsByGroup, ADVANCE_COUNT);
-    if ("error" in seedsResult) return { generated: false }; // 예: 한 조에 팀이 2개 미만
-
-    const bracketResult = buildKnockoutBracket(seedsResult);
-    if ("error" in bracketResult) return { generated: false };
+    const bracketResult = buildDivisionKnockout(standingsByGroup, ADVANCE_COUNT);
+    if ("error" in bracketResult) return { generated: false }; // 예: 한 조에 팀이 2개 미만
 
     const { matchCount } = await commitKnockoutBracket(tournamentId, division, bracketResult, Date.now());
     return { generated: true, matchCount };

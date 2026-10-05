@@ -97,7 +97,9 @@ export default function StandingsBoard({
         <p className="text-sm text-neutral-500">
           {data.isLeague
             ? "승점(승 3점·패 0점)이 가장 높은 팀이 우승합니다. 승점이 같으면 승자승으로 순위를 정합니다."
-            : "조별리그가 끝나면 각 조 1·2위로 토너먼트 대진이 자동 생성됩니다."}
+            : data.groups.length === 2
+              ? "조별리그가 끝나면 각 조 1위끼리 결승, 각 조 2위끼리 3·4위전이 자동 생성됩니다. 조 순위는 승점 → 승자승으로 정합니다."
+              : "조별리그가 끝나면 각 조 1·2위로 토너먼트 대진이 자동 생성됩니다. 조 순위는 승점 → 승자승으로 정합니다."}
         </p>
         {leagueError && <p className="text-sm text-red-600">{leagueError}</p>}
       </div>
@@ -123,7 +125,7 @@ export default function StandingsBoard({
                 <th className="px-3 py-2">순위</th>
                 <th className="px-3 py-2">팀명</th>
                 <th className="px-3 py-2">경기</th>
-                {data.isLeague && <th className="px-3 py-2">승점</th>}
+                <th className="px-3 py-2">승점</th>
                 <th className="px-3 py-2">승</th>
                 <th className="px-3 py-2">패</th>
                 <th className="px-3 py-2">득실차</th>
@@ -135,7 +137,7 @@ export default function StandingsBoard({
                   <td className="px-3 py-2">{s.rank}</td>
                   <td className="px-3 py-2">{s.teamName}</td>
                   <td className="px-3 py-2">{s.played}</td>
-                  {data.isLeague && <td className="px-3 py-2 font-medium">{s.leaguePoints}</td>}
+                  <td className="px-3 py-2 font-medium">{s.leaguePoints}</td>
                   <td className="px-3 py-2">{s.wins}</td>
                   <td className="px-3 py-2">{s.losses}</td>
                   <td className="px-3 py-2">{s.pointDiff > 0 ? `+${s.pointDiff}` : s.pointDiff}</td>

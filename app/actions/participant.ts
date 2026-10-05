@@ -22,6 +22,7 @@ import { applyCascadingAdvancement } from "@/lib/matches/advancement";
 import { autoGenerateKnockoutBracket } from "@/lib/bracket/autoGenerateKnockout";
 import { computeGroupStandings, type TeamStanding } from "@/lib/standings/standings";
 import { computePodium, type PodiumEntry } from "@/lib/standings/podium";
+import { divisionWait, type DivisionWait } from "@/lib/matches/divisionOrder";
 import type { Match, MatchSide, Team } from "@/types/domain";
 
 export interface JoinState {
@@ -110,7 +111,9 @@ export interface MyDivisionView {
   standings: TeamStanding[]; // 내 조 순위
   groupConfirmed: number;
   groupTotal: number;
+  groupSchedule: Match[]; // 내 조 조별리그 전체 경기, 진행 순서대로
   podium: PodiumEntry[];
+  wait: DivisionWait | null; // 먼저 끝나야 하는 다른 부문 경기가 남아 있으면 안내
 }
 
 /** 내 팀이 속한 조의 순위표와 부문 최종 결과(우승 등). 세션 기반이라 인자 없음. */
@@ -128,17 +131,22 @@ export async function getMyDivisionView(): Promise<MyDivisionView | null> {
   if (!team) return null;
 
   const teams = teamsSnap.docs.map((d) => d.data()).filter((t) => t.division === team.division);
-  const divisionMatches = matchesSnap.docs.map((d) => d.data()).filter((m) => m.division === team.division);
+  const allMatches = matchesSnap.docs.map((d) => d.data());
+  const divisionMatches = allMatches.filter((m) => m.division === team.division);
   const groupMatches = divisionMatches.filter((m) => m.stage === "group");
   const standingsByGroup = computeGroupStandings(teams, groupMatches);
   const isLeague = tournamentSnap.data()?.leagueDivisions?.includes(team.division) ?? false;
 
-  const myGroupMatches = groupMatches.filter((m) => m.group === team.group);
+  const myGroupMatches = groupMatches
+    .filter((m) => m.group === team.group)
+    .sort((a, b) => (a.roundIndex ?? 0) - (b.roundIndex ?? 0) || (a.order ?? 0) - (b.order ?? 0));
   return {
+    groupSchedule: myGroupMatches,
     standings: (team.group && standingsByGroup.get(team.group)) || [],
     groupConfirmed: myGroupMatches.filter((m) => m.status === "confirmed").length,
     groupTotal: myGroupMatches.length,
     podium: computePodium(divisionMatches, standingsByGroup, isLeague),
+    wait: divisionWait(team.division, allMatches),
   };
 }
 

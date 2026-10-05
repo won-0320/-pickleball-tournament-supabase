@@ -11,7 +11,13 @@ import {
   matchDoc,
 } from "@/lib/firebase/collections";
 import { createTeamSession, destroyTeamSession, getTeamSession } from "@/lib/session/teamSession";
-import { submitScore as submitScoreFlow, confirmScore as confirmScoreFlow } from "@/lib/matches/scoreFlow";
+import {
+  submitScore as submitScoreFlow,
+  confirmScore as confirmScoreFlow,
+  editSubmission as editSubmissionFlow,
+  cancelSubmission as cancelSubmissionFlow,
+  type ScoreFlowResult,
+} from "@/lib/matches/scoreFlow";
 import { applyCascadingAdvancement } from "@/lib/matches/advancement";
 import { autoGenerateKnockoutBracket } from "@/lib/bracket/autoGenerateKnockout";
 import { computeGroupStandings, type TeamStanding } from "@/lib/standings/standings";
@@ -205,6 +211,56 @@ export async function submitMatchScore(
   revalidatePath(`/team/${session.teamId}`);
   revalidatePath(`/team/${session.teamId}/match/${matchId}`);
   return { error: null };
+}
+
+/**
+ * 제출한 팀이 상대 확인 전에 자기 제출을 수정/취소. 읽은 뒤 상대가 먼저
+ * 확인했으면 덮어쓰지 않도록 updateTime 전제조건으로 업데이트한다.
+ */
+async function changeOwnSubmission(
+  matchId: string,
+  apply: (match: Match, side: MatchSide) => ScoreFlowResult
+): Promise<ScoreActionState> {
+  const session = await getTeamSession();
+  if (!session) return { error: "세션이 만료되었습니다. 다시 코드를 입력해주세요." };
+
+  const ref = matchDoc(session.tournamentId, matchId);
+  const snap = await ref.get();
+  const match = snap.data();
+  if (!match || !snap.updateTime) return { error: "경기 정보를 찾을 수 없습니다." };
+
+  let side: MatchSide;
+  if (match.teamAId === session.teamId) side = "teamA";
+  else if (match.teamBId === session.teamId) side = "teamB";
+  else return { error: "이 경기에 참가하는 팀이 아닙니다." };
+
+  const result = apply(match, side);
+  if (!result.ok) return { error: result.error.message };
+
+  try {
+    await ref.update(result.patch, { lastUpdateTime: snap.updateTime });
+  } catch {
+    return { error: "그 사이 상대팀이 점수를 확인했습니다. 화면을 새로고침해주세요." };
+  }
+  revalidatePath(`/team/${session.teamId}`);
+  revalidatePath(`/team/${session.teamId}/match/${matchId}`);
+  return { error: null };
+}
+
+export async function editMatchSubmission(
+  matchId: string,
+  scoreOwn: number,
+  scoreOpponent: number
+): Promise<ScoreActionState> {
+  return changeOwnSubmission(matchId, (match, side) => {
+    const scoreA = side === "teamA" ? scoreOwn : scoreOpponent;
+    const scoreB = side === "teamA" ? scoreOpponent : scoreOwn;
+    return editSubmissionFlow(match, side, scoreA, scoreB, Date.now());
+  });
+}
+
+export async function cancelMatchSubmission(matchId: string): Promise<ScoreActionState> {
+  return changeOwnSubmission(matchId, (match, side) => cancelSubmissionFlow(match, side, Date.now()));
 }
 
 export async function confirmMatchScore(

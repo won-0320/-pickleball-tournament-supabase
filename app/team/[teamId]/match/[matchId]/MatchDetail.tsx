@@ -4,7 +4,12 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Match, MatchSide } from "@/types/domain";
 import { STATUS_BADGE_CLASSES, STATUS_LABELS } from "@/lib/matches/statusLabels";
-import { submitMatchScore, confirmMatchScore } from "@/app/actions/participant";
+import {
+  submitMatchScore,
+  confirmMatchScore,
+  editMatchSubmission,
+  cancelMatchSubmission,
+} from "@/app/actions/participant";
 
 function toOwnPerspective(side: MatchSide, a: number, b: number) {
   return side === "teamA" ? { own: a, opponent: b } : { own: b, opponent: a };
@@ -51,6 +56,34 @@ export default function MatchDetail({
         return;
       }
       setEditing(false);
+      router.refresh();
+    });
+  }
+
+  function runEditSubmission() {
+    setError(null);
+    startTransition(async () => {
+      const res = await editMatchSubmission(match.id, Number(ownScore), Number(opponentScore));
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setEditing(false);
+      router.refresh();
+    });
+  }
+
+  function runCancelSubmission() {
+    if (!window.confirm("제출한 점수를 취소할까요? 경기가 '점수 미입력' 상태로 돌아갑니다.")) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await cancelMatchSubmission(match.id);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setOwnScore("");
+      setOpponentScore("");
       router.refresh();
     });
   }
@@ -131,6 +164,35 @@ export default function MatchDetail({
     const { own, opponent } = toOwnPerspective(side, submittedA, submittedB);
 
     if (match.submittedBy === side) {
+      if (editing) {
+        return (
+          <div>
+            {header}
+            <p className="mb-4 text-sm text-neutral-600">
+              상대팀이 확인하기 전까지 제출한 점수를 고칠 수 있습니다.
+            </p>
+            <ScoreEntryForm
+              ownLabel={`${ownTeamName} 점수`}
+              opponentLabel={`${opponentTeamName} 점수`}
+              ownScore={ownScore}
+              opponentScore={opponentScore}
+              setOwnScore={setOwnScore}
+              setOpponentScore={setOpponentScore}
+              onSubmit={runEditSubmission}
+              submitLabel="수정한 점수로 제출"
+              pending={pending}
+              error={error}
+            />
+            <button
+              onClick={() => setEditing(false)}
+              className="mt-3 w-full text-sm text-neutral-400 underline"
+            >
+              돌아가기
+            </button>
+          </div>
+        );
+      }
+
       return (
         <div>
           {header}
@@ -141,6 +203,30 @@ export default function MatchDetail({
             <p className="mt-2 text-sm text-amber-700">
               상대팀의 확인을 기다리는 중입니다.
             </p>
+          </div>
+
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+
+          <div className="mt-4 flex gap-3">
+            <button
+              onClick={() => {
+                setOwnScore(String(own));
+                setOpponentScore(String(opponent));
+                setError(null);
+                setEditing(true);
+              }}
+              disabled={pending}
+              className="flex-1 rounded-lg border border-neutral-300 px-4 py-3 text-neutral-700 disabled:opacity-50"
+            >
+              점수 수정
+            </button>
+            <button
+              onClick={runCancelSubmission}
+              disabled={pending}
+              className="flex-1 rounded-lg border border-red-300 px-4 py-3 text-red-600 disabled:opacity-50"
+            >
+              {pending ? "처리 중..." : "제출 취소"}
+            </button>
           </div>
         </div>
       );

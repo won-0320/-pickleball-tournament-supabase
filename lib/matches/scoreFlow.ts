@@ -77,6 +77,58 @@ export function submitScore(
   };
 }
 
+function requireOwnPendingSubmission(match: Match, side: MatchSide): ScoreFlowError | null {
+  if (match.status !== "awaiting_confirmation" || match.submittedBy !== side) {
+    return {
+      code: "wrong_state",
+      message: "상대팀이 이미 확인했거나 처리된 경기라 수정·취소할 수 없습니다.",
+    };
+  }
+  return null;
+}
+
+/**
+ * The submitting team changes its own submitted score while the opponent
+ * hasn't confirmed yet. Stays "awaiting_confirmation".
+ */
+export function editSubmission(
+  match: Match,
+  side: MatchSide,
+  scoreA: number,
+  scoreB: number,
+  now: number
+): ScoreFlowResult {
+  const wrongState = requireOwnPendingSubmission(match, side);
+  if (wrongState) return { ok: false, error: wrongState };
+
+  const ownScore = side === "teamA" ? scoreA : scoreB;
+  const opponentScore = side === "teamA" ? scoreB : scoreA;
+  const invalid = validateScores(ownScore, opponentScore);
+  if (invalid) return { ok: false, error: invalid };
+
+  return {
+    ok: true,
+    patch: { submittedScoreA: scoreA, submittedScoreB: scoreB, updatedAt: now },
+  };
+}
+
+/** The submitting team withdraws its submission; the match returns to "pending". */
+export function cancelSubmission(match: Match, side: MatchSide, now: number): ScoreFlowResult {
+  const wrongState = requireOwnPendingSubmission(match, side);
+  if (wrongState) return { ok: false, error: wrongState };
+
+  return {
+    ok: true,
+    patch: {
+      status: "pending",
+      submittedBy: null,
+      submittedScoreA: null,
+      submittedScoreB: null,
+      updatedAt: now,
+    },
+  };
+}
+
 /**
  * Opposing team confirms (or disputes) a submitted score. Only the side
  * that did NOT submit may confirm. Matching scores finalize the match;

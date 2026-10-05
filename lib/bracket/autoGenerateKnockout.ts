@@ -2,7 +2,7 @@ import { buildSeedList } from "@/lib/bracket/seeding";
 import { buildKnockoutBracket } from "@/lib/bracket/knockoutBracket";
 import { commitKnockoutBracket } from "@/lib/bracket/commitKnockoutBracket";
 import { computeGroupStandings } from "@/lib/standings/standings";
-import { teamsCol, matchesCol } from "@/lib/firebase/collections";
+import { tournamentDoc, teamsCol, matchesCol } from "@/lib/firebase/collections";
 
 const ADVANCE_COUNT = 2; // 고정: 조 1·2위 진출
 
@@ -22,6 +22,9 @@ export async function autoGenerateKnockoutBracket(
   division: string
 ): Promise<AutoGenerateKnockoutResult> {
   try {
+    const tournament = (await tournamentDoc(tournamentId).get()).data();
+    if (tournament?.leagueDivisions?.includes(division)) return { generated: false }; // 리그전 부문은 토너먼트 없음
+
     const matchesSnap = await matchesCol(tournamentId).get();
     const divisionMatches = matchesSnap.docs.map((d) => d.data()).filter((m) => m.division === division);
 

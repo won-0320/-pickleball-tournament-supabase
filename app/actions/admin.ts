@@ -391,6 +391,7 @@ export interface DivisionStandingsResult {
   divisions: string[];
   groups: GroupStandingsView[];
   knockoutGenerated: boolean;
+  isLeague: boolean;
 }
 
 export async function getDivisionStandings(division: string): Promise<DivisionStandingsResult> {
@@ -402,12 +403,20 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
       divisions: [],
       groups: [],
       knockoutGenerated: false,
+      isLeague: false,
     };
   }
 
   const tournament = await getActiveTournament();
   if (!tournament) {
-    return { error: "활성화된 대회가 없습니다.", division, divisions: [], groups: [], knockoutGenerated: false };
+    return {
+      error: "활성화된 대회가 없습니다.",
+      division,
+      divisions: [],
+      groups: [],
+      knockoutGenerated: false,
+      isLeague: false,
+    };
   }
 
   const [teamsSnap, matchesSnap] = await Promise.all([
@@ -421,8 +430,9 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
   const divisionMatches = allMatches.filter((m) => m.division === division);
   const groupMatches = divisionMatches.filter((m) => m.stage === "group");
   const knockoutGenerated = divisionMatches.some((m) => m.stage === "knockout");
+  const isLeague = tournament.leagueDivisions?.includes(division) ?? false;
 
-  const standingsByGroup = computeGroupStandings(teams, groupMatches);
+  const standingsByGroup = computeGroupStandings(teams, groupMatches, isLeague ? "league" : "default");
 
   const groups: GroupStandingsView[] = Array.from(standingsByGroup.entries())
     .sort(([a], [b]) => a.localeCompare(b))
@@ -443,7 +453,44 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
     divisions: Array.from(new Set(allTeams.map((t) => t.division))).sort(),
     groups,
     knockoutGenerated,
+    isLeague,
   };
+}
+
+export async function setDivisionLeague(
+  division: string,
+  league: boolean
+): Promise<{ error?: string }> {
+  const admin = await isAdminSession();
+  if (!admin) return { error: "관리자 인증이 필요합니다." };
+
+  const tournament = await getActiveTournament();
+  if (!tournament) return { error: "활성화된 대회가 없습니다." };
+
+  if (league) {
+    const matchesSnap = await matchesCol(tournament.id).get();
+    const knockoutAlready = matchesSnap.docs.some(
+      (d) => d.data().division === division && d.data().stage === "knockout"
+    );
+    if (knockoutAlready) {
+      return { error: "이미 토너먼트 대진이 생성된 부문은 리그전으로 바꿀 수 없습니다." };
+    }
+  }
+
+  const current = tournament.leagueDivisions ?? [];
+  const next = league
+    ? Array.from(new Set([...current, division])).sort()
+    : current.filter((d) => d !== division);
+  await tournamentDoc(tournament.id).update({ leagueDivisions: next });
+
+  // 리그전을 해제했는데 조별리그가 이미 다 끝나 있으면 바로 토너먼트를 생성.
+  if (!league) {
+    await autoGenerateKnockoutBracket(tournament.id, division);
+  }
+
+  revalidatePath("/admin/standings");
+  revalidatePath("/admin/matches");
+  return {};
 }
 
 export interface GenerateBracketResult {
@@ -469,6 +516,10 @@ export async function generateKnockoutBracket(
   const matchesSnap = await matchesCol(tournament.id).get();
   const allMatches = matchesSnap.docs.map((d) => d.data());
   const divisionMatches = allMatches.filter((m) => m.division === division);
+
+  if (tournament.leagueDivisions?.includes(division)) {
+    return { error: "리그전 부문은 토너먼트 대진을 생성하지 않습니다." };
+  }
 
   if (divisionMatches.some((m) => m.stage === "knockout")) {
     return { error: "이미 이 부문의 토너먼트 대진이 생성되어 있습니다. 재생성은 지원하지 않습니다." };

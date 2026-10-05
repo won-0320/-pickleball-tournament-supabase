@@ -1,5 +1,9 @@
 import type { Match } from "@/types/domain";
 
+export type RankingRule = "default" | "league";
+
+export const LEAGUE_POINTS_PER_WIN = 3; // 리그전 승점: 승 3점, 패 0점 (피클볼은 무승부 없음)
+
 export interface TeamStanding {
   teamId: string;
   teamName: string;
@@ -10,6 +14,7 @@ export interface TeamStanding {
   pointsFor: number;
   pointsAgainst: number;
   pointDiff: number;
+  leaguePoints: number;
   rank: number; // 1-based
 }
 
@@ -42,10 +47,14 @@ function isCountableGroupMatch(m: Match): boolean {
  * differential desc -> head-to-head (2-way tie) / mini-league among tied
  * teams (3+-way tie) -> alphabetical team name as a final, documented
  * simplification (does not attempt to resolve a fully circular 3+-way tie).
+ *
+ * rule === "league" (리그전 부문): 승점 desc -> 승자승 among tied teams
+ * (see orderLeagueStandings) instead of the point-differential-first order.
  */
 export function computeGroupStandings(
   teams: { id: string; teamName: string; group: string | null }[],
-  matches: Match[]
+  matches: Match[],
+  rule: RankingRule = "default"
 ): Map<string, TeamStanding[]> {
   const countable = matches.filter(isCountableGroupMatch);
 
@@ -99,7 +108,10 @@ export function computeGroupStandings(
       }
     }
 
-    const ordered = orderStandings(Array.from(stats.values()), groupMatches);
+    const ordered =
+      rule === "league"
+        ? orderLeagueStandings(Array.from(stats.values()), groupMatches)
+        : orderStandings(Array.from(stats.values()), groupMatches);
     result.set(
       group,
       ordered.map((s, i) => ({
@@ -112,6 +124,7 @@ export function computeGroupStandings(
         pointsFor: s.pointsFor,
         pointsAgainst: s.pointsAgainst,
         pointDiff: s.pointsFor - s.pointsAgainst,
+        leaguePoints: s.wins * LEAGUE_POINTS_PER_WIN,
         rank: i + 1,
       }))
     );
@@ -190,5 +203,66 @@ function resolveTieBlock(block: RawStats[], groupMatches: Match[]): RawStats[] {
     const m1 = mini.get(s1.teamId)!;
     const m2 = mini.get(s2.teamId)!;
     return m2.wins - m1.wins || m2.diff - m1.diff || s1.teamName.localeCompare(s2.teamName);
+  });
+}
+
+/**
+ * 리그전 순위: 승점 desc -> 승자승. 승점이 같은 팀들끼리의 맞대결 승수로
+ * 가르고, 그 안에서 다시 동률인 팀이 남으면 그 팀들끼리만 승자승을 다시
+ * 적용한다. 3팀 이상이 서로 물고 물려(순환) 승자승으로 가를 수 없으면
+ * 동률 팀 간 경기 득실차 -> 전체 득실차 -> 팀명 순.
+ */
+function orderLeagueStandings(stats: RawStats[], groupMatches: Match[]): RawStats[] {
+  const byWins = [...stats].sort((a, b) => b.wins - a.wins);
+  const result: RawStats[] = [];
+  let i = 0;
+  while (i < byWins.length) {
+    let j = i + 1;
+    while (j < byWins.length && byWins[j]!.wins === byWins[i]!.wins) j++;
+    result.push(...resolveHeadToHead(byWins.slice(i, j), groupMatches));
+    i = j;
+  }
+  return result;
+}
+
+function resolveHeadToHead(block: RawStats[], groupMatches: Match[]): RawStats[] {
+  if (block.length <= 1) return block;
+
+  const tiedIds = new Set(block.map((s) => s.teamId));
+  const mini = new Map<string, { wins: number; diff: number }>();
+  for (const s of block) mini.set(s.teamId, { wins: 0, diff: 0 });
+  for (const m of groupMatches) {
+    if (!tiedIds.has(m.teamAId as string) || !tiedIds.has(m.teamBId as string)) continue;
+    const scoreA = m.scoreA as number;
+    const scoreB = m.scoreB as number;
+    const a = mini.get(m.teamAId as string)!;
+    const b = mini.get(m.teamBId as string)!;
+    a.diff += scoreA - scoreB;
+    b.diff += scoreB - scoreA;
+    if (scoreA > scoreB) a.wins += 1;
+    else b.wins += 1;
+  }
+
+  const sorted = [...block].sort((x, y) => mini.get(y.teamId)!.wins - mini.get(x.teamId)!.wins);
+  const separated = mini.get(sorted[0]!.teamId)!.wins !== mini.get(sorted[sorted.length - 1]!.teamId)!.wins;
+
+  if (separated) {
+    // 승자승으로 일부라도 갈렸으면, 여전히 같은 팀들끼리만 다시 승자승 적용.
+    const result: RawStats[] = [];
+    let i = 0;
+    while (i < sorted.length) {
+      let j = i + 1;
+      const w = mini.get(sorted[i]!.teamId)!.wins;
+      while (j < sorted.length && mini.get(sorted[j]!.teamId)!.wins === w) j++;
+      result.push(...resolveHeadToHead(sorted.slice(i, j), groupMatches));
+      i = j;
+    }
+    return result;
+  }
+
+  return sorted.sort((x, y) => {
+    const mx = mini.get(x.teamId)!;
+    const my = mini.get(y.teamId)!;
+    return my.diff - mx.diff || pointDiff(y) - pointDiff(x) || x.teamName.localeCompare(y.teamName);
   });
 }

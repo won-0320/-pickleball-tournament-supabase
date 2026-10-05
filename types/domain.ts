@@ -7,6 +7,7 @@ export interface Tournament {
   divisions: string[];
   createdAt: number;
   bracketUploadedAt: number | null;
+  leagueDivisions?: string[]; // 토너먼트 없이 리그전(승점 → 승자승)으로만 순위를 정하는 부문
 }
 
 export interface Team {

@@ -2,11 +2,20 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { getActiveTournament, teamsCol, teamDoc, matchesCol, matchDoc } from "@/lib/firebase/collections";
+import {
+  getActiveTournament,
+  tournamentDoc,
+  teamsCol,
+  teamDoc,
+  matchesCol,
+  matchDoc,
+} from "@/lib/firebase/collections";
 import { createTeamSession, destroyTeamSession, getTeamSession } from "@/lib/session/teamSession";
 import { submitScore as submitScoreFlow, confirmScore as confirmScoreFlow } from "@/lib/matches/scoreFlow";
 import { applyCascadingAdvancement } from "@/lib/matches/advancement";
 import { autoGenerateKnockoutBracket } from "@/lib/bracket/autoGenerateKnockout";
+import { computeGroupStandings, type TeamStanding } from "@/lib/standings/standings";
+import { computePodium, type PodiumEntry } from "@/lib/standings/podium";
 import type { Match, MatchSide, Team } from "@/types/domain";
 
 export interface JoinState {
@@ -89,6 +98,42 @@ export async function getMyMatches(): Promise<MyMatchesResult> {
   );
 
   return { team, matches };
+}
+
+export interface MyDivisionView {
+  standings: TeamStanding[]; // 내 조 순위
+  groupConfirmed: number;
+  groupTotal: number;
+  podium: PodiumEntry[];
+}
+
+/** 내 팀이 속한 조의 순위표와 부문 최종 결과(우승 등). 세션 기반이라 인자 없음. */
+export async function getMyDivisionView(): Promise<MyDivisionView | null> {
+  const session = await getTeamSession();
+  if (!session) return null;
+
+  const [tournamentSnap, teamSnap, teamsSnap, matchesSnap] = await Promise.all([
+    tournamentDoc(session.tournamentId).get(),
+    teamDoc(session.tournamentId, session.teamId).get(),
+    teamsCol(session.tournamentId).get(),
+    matchesCol(session.tournamentId).get(),
+  ]);
+  const team = teamSnap.data();
+  if (!team) return null;
+
+  const teams = teamsSnap.docs.map((d) => d.data()).filter((t) => t.division === team.division);
+  const divisionMatches = matchesSnap.docs.map((d) => d.data()).filter((m) => m.division === team.division);
+  const groupMatches = divisionMatches.filter((m) => m.stage === "group");
+  const standingsByGroup = computeGroupStandings(teams, groupMatches);
+  const isLeague = tournamentSnap.data()?.leagueDivisions?.includes(team.division) ?? false;
+
+  const myGroupMatches = groupMatches.filter((m) => m.group === team.group);
+  return {
+    standings: (team.group && standingsByGroup.get(team.group)) || [],
+    groupConfirmed: myGroupMatches.filter((m) => m.status === "confirmed").length,
+    groupTotal: myGroupMatches.length,
+    podium: computePodium(divisionMatches, standingsByGroup, isLeague),
+  };
 }
 
 export interface MatchDetailResult {

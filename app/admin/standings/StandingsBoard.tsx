@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import PodiumCard from "@/app/components/PodiumCard";
 import {
   getDivisionStandings,
   generateKnockoutBracket,
@@ -76,10 +77,6 @@ export default function StandingsBoard({
     ? Math.min(...data.groups.map((g) => g.standings.length))
     : 0;
   const allGroupsConfirmed = data.groups.length > 0 && data.groups.every((g) => g.allConfirmed);
-  const champion =
-    data.isLeague && allGroupsConfirmed && data.groups.length === 1
-      ? data.groups[0]!.standings[0]
-      : undefined;
 
   return (
     <div className="flex flex-col gap-6">
@@ -120,12 +117,7 @@ export default function StandingsBoard({
         {leagueError && <p className="text-sm text-red-600">{leagueError}</p>}
       </div>
 
-      {champion && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
-          <p className="text-sm">부문 {division} 우승</p>
-          <p className="text-lg font-bold">{champion.teamName}</p>
-        </div>
-      )}
+      {data.podium.length > 0 && <PodiumCard title={`부문 ${division} 최종 결과`} podium={data.podium} />}
 
       {data.groups.map((g) => (
         <div key={g.group} className="rounded-lg border border-neutral-200">

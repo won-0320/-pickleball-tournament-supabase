@@ -21,6 +21,7 @@ import {
 import { buildDivisionKnockout } from "@/lib/bracket/divisionKnockout";
 import { commitKnockoutBracket } from "@/lib/bracket/commitKnockoutBracket";
 import { computeGroupStandings, type TeamStanding } from "@/lib/standings/standings";
+import { computePodium, type PodiumEntry } from "@/lib/standings/podium";
 import { getDb } from "@/lib/firebase/admin";
 import {
   getActiveTournament,
@@ -445,6 +446,7 @@ export interface DivisionStandingsResult {
   knockoutGenerated: boolean;
   knockoutPlayedCount: number;
   isLeague: boolean;
+  podium: PodiumEntry[];
 }
 
 export async function getDivisionStandings(division: string): Promise<DivisionStandingsResult> {
@@ -458,6 +460,7 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
       knockoutGenerated: false,
       knockoutPlayedCount: 0,
       isLeague: false,
+      podium: [],
     };
   }
 
@@ -471,6 +474,7 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
       knockoutGenerated: false,
       knockoutPlayedCount: 0,
       isLeague: false,
+      podium: [],
     };
   }
 
@@ -513,6 +517,7 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
     knockoutGenerated,
     knockoutPlayedCount,
     isLeague,
+    podium: computePodium(divisionMatches, standingsByGroup, isLeague),
   };
 }
 

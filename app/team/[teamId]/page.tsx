@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getMyMatches, requireTeamSession, leaveTeamSession } from "@/app/actions/participant";
+import {
+  getMyMatches,
+  getMyDivisionView,
+  requireTeamSession,
+  leaveTeamSession,
+} from "@/app/actions/participant";
+import PodiumCard from "@/app/components/PodiumCard";
 import { STATUS_BADGE_CLASSES, STATUS_LABELS } from "@/lib/matches/statusLabels";
 import PollOnInterval from "@/lib/hooks/PollOnInterval";
 import type { Match } from "@/types/domain";
@@ -16,7 +22,10 @@ export default async function TeamMatchesPage({
     redirect(`/team/${session.teamId}`);
   }
 
-  const { error, team, matches } = await getMyMatches();
+  const [{ error, team, matches }, divisionView] = await Promise.all([
+    getMyMatches(),
+    getMyDivisionView(),
+  ]);
 
   if (error || !team) {
     return (
@@ -43,6 +52,54 @@ export default async function TeamMatchesPage({
             {team.player1} / {team.player2}
           </p>
         </div>
+
+        {divisionView && divisionView.podium.length > 0 && (
+          <section className="mb-6">
+            <PodiumCard
+              title={`부문 ${team.division} 최종 결과`}
+              podium={divisionView.podium}
+              highlightTeamId={team.id}
+            />
+          </section>
+        )}
+
+        {divisionView && divisionView.standings.length > 0 && (
+          <section className="mb-6">
+            <div className="mb-2 flex items-baseline justify-between">
+              <h2 className="text-sm font-semibold text-neutral-500">{team.group}조 순위</h2>
+              <p className="text-xs text-neutral-400">
+                {divisionView.groupConfirmed}/{divisionView.groupTotal}경기 확정 · 승점 → 승자승
+              </p>
+            </div>
+            <table className="w-full overflow-hidden rounded-xl border border-neutral-200 text-center text-sm">
+              <thead className="bg-neutral-50 text-xs text-neutral-500">
+                <tr>
+                  <th className="px-2 py-2">순위</th>
+                  <th className="px-2 py-2 text-left">팀</th>
+                  <th className="px-2 py-2">승</th>
+                  <th className="px-2 py-2">패</th>
+                  <th className="px-2 py-2">승점</th>
+                </tr>
+              </thead>
+              <tbody>
+                {divisionView.standings.map((s) => (
+                  <tr
+                    key={s.teamId}
+                    className={`border-t border-neutral-100 ${
+                      s.teamId === team.id ? "bg-neutral-100 font-semibold" : ""
+                    }`}
+                  >
+                    <td className="px-2 py-2">{s.rank}</td>
+                    <td className="px-2 py-2 text-left">{s.teamName}</td>
+                    <td className="px-2 py-2">{s.wins}</td>
+                    <td className="px-2 py-2">{s.losses}</td>
+                    <td className="px-2 py-2">{s.leaguePoints}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        )}
 
         {groupMatches.length > 0 && (
           <section className="mb-6">

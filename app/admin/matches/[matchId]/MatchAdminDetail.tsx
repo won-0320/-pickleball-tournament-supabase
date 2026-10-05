@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Match, Team } from "@/types/domain";
 import { STATUS_BADGE_CLASSES, STATUS_LABELS } from "@/lib/matches/statusLabels";
-import { resolveMatchDispute, overrideMatchScore } from "@/app/actions/admin";
+import { resolveMatchDispute, overrideMatchScore, resetMatch } from "@/app/actions/admin";
 
 export default function MatchAdminDetail({
   match,
@@ -47,6 +47,25 @@ export default function MatchAdminDetail({
         return;
       }
       setOverrideOpen(false);
+      router.refresh();
+    });
+  }
+
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  function handleReset() {
+    if (!window.confirm("이 경기의 점수를 모두 지우고 '점수 미입력' 상태로 되돌립니다. 두 팀이 처음부터 다시 입력해야 합니다. 계속할까요?")) {
+      return;
+    }
+    setResetError(null);
+    startTransition(async () => {
+      const res = await resetMatch(match.id);
+      if (res.error) {
+        setResetError(res.error);
+        return;
+      }
+      setOverrideA("");
+      setOverrideB("");
       router.refresh();
     });
   }
@@ -241,6 +260,22 @@ export default function MatchAdminDetail({
           </div>
         )}
       </div>
+
+      {match.status !== "pending" && !match.isBye && (
+        <div className="flex flex-col gap-2 rounded-lg border border-neutral-200 p-4">
+          <p className="text-xs text-neutral-500">
+            점수를 지우고 처음 상태로 되돌립니다. 두 팀이 점수를 다시 입력·확인해야 합니다.
+          </p>
+          {resetError && <p className="text-sm text-red-600">{resetError}</p>}
+          <button
+            onClick={handleReset}
+            disabled={pending}
+            className="w-fit rounded-lg border border-red-300 px-4 py-3 text-sm font-medium text-red-600 disabled:opacity-50"
+          >
+            {pending ? "처리 중..." : "점수 초기화"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -375,6 +375,59 @@ export async function overrideMatchScore(
   return { error: null };
 }
 
+export async function resetMatch(matchId: string): Promise<ResolveDisputeState> {
+  const admin = await isAdminSession();
+  if (!admin) return { error: "관리자 인증이 필요합니다." };
+
+  const tournament = await getActiveTournament();
+  if (!tournament) return { error: "활성화된 대회가 없습니다." };
+
+  const ref = matchDoc(tournament.id, matchId);
+  const match = (await ref.get()).data();
+  if (!match) return { error: "경기를 찾을 수 없습니다." };
+  if (match.isBye) return { error: "부전승 경기는 초기화할 수 없습니다." };
+
+  const ops: BatchOp[] = [];
+
+  // 토너먼트 경기면 다음 라운드로 올라간 승자도 되돌린다. 다음 경기가 이미
+  // 진행됐다면 결과가 꼬이므로 막는다.
+  if (match.nextMatchId && match.nextMatchSlot && match.status === "confirmed") {
+    const nextRef = matchDoc(tournament.id, match.nextMatchId);
+    const next = (await nextRef.get()).data();
+    if (next) {
+      if (next.status !== "pending") {
+        return { error: "다음 라운드 경기가 이미 진행되어 이 경기를 초기화할 수 없습니다. 다음 경기부터 초기화해주세요." };
+      }
+      const slotPatch =
+        match.nextMatchSlot === "teamA"
+          ? { teamAId: null, teamAName: null }
+          : { teamBId: null, teamBName: null };
+      ops.push((batch) => batch.update(nextRef, { ...slotPatch, updatedAt: Date.now() }));
+    }
+  }
+
+  ops.push((batch) =>
+    batch.update(ref, {
+      status: "pending",
+      scoreA: null,
+      scoreB: null,
+      submittedBy: null,
+      submittedScoreA: null,
+      submittedScoreB: null,
+      opponentScoreA: null,
+      opponentScoreB: null,
+      resolvedBy: null,
+      updatedAt: Date.now(),
+    })
+  );
+  await commitInChunks(ops);
+
+  revalidatePath("/admin/matches");
+  revalidatePath(`/admin/matches/${matchId}`);
+  revalidatePath("/admin/standings");
+  return { error: null };
+}
+
 export interface GroupStandingsView {
   group: string;
   standings: TeamStanding[];
@@ -390,6 +443,7 @@ export interface DivisionStandingsResult {
   divisions: string[];
   groups: GroupStandingsView[];
   knockoutGenerated: boolean;
+  knockoutPlayedCount: number;
   isLeague: boolean;
 }
 
@@ -402,6 +456,7 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
       divisions: [],
       groups: [],
       knockoutGenerated: false,
+      knockoutPlayedCount: 0,
       isLeague: false,
     };
   }
@@ -414,6 +469,7 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
       divisions: [],
       groups: [],
       knockoutGenerated: false,
+      knockoutPlayedCount: 0,
       isLeague: false,
     };
   }
@@ -429,6 +485,9 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
   const divisionMatches = allMatches.filter((m) => m.division === division);
   const groupMatches = divisionMatches.filter((m) => m.stage === "group");
   const knockoutGenerated = divisionMatches.some((m) => m.stage === "knockout");
+  const knockoutPlayedCount = divisionMatches.filter(
+    (m) => m.stage === "knockout" && !m.isBye && m.status !== "pending"
+  ).length;
   const isLeague = tournament.leagueDivisions?.includes(division) ?? false;
 
   const standingsByGroup = computeGroupStandings(teams, groupMatches);
@@ -452,6 +511,7 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
     divisions: Array.from(new Set(allTeams.map((t) => t.division))).sort(),
     groups,
     knockoutGenerated,
+    knockoutPlayedCount,
     isLeague,
   };
 }
@@ -552,6 +612,50 @@ export async function generateKnockoutBracket(
   revalidatePath("/admin/standings");
   revalidatePath("/admin/matches");
 
+  return { warnings: bracketResult.warnings, matchCount };
+}
+
+const REGENERATE_ADVANCE_COUNT = 2; // 자동 생성과 동일: 조 1·2위 진출
+
+/**
+ * 이 부문의 기존 토너먼트(결승·3·4위전 포함) 경기를 모두 지우고, 현재
+ * 조별리그 순위로 다시 만든다. 조별리그 점수를 고친 뒤 대진을 바로잡는 용도.
+ */
+export async function regenerateKnockoutBracket(division: string): Promise<GenerateBracketResult> {
+  const admin = await isAdminSession();
+  if (!admin) return { error: "관리자 인증이 필요합니다." };
+
+  const tournament = await getActiveTournament();
+  if (!tournament) return { error: "활성화된 대회가 없습니다." };
+  if (tournament.leagueDivisions?.includes(division)) {
+    return { error: "리그전 부문은 토너먼트 대진을 생성하지 않습니다." };
+  }
+
+  const matchesSnap = await matchesCol(tournament.id).get();
+  const divisionMatches = matchesSnap.docs.map((d) => d.data()).filter((m) => m.division === division);
+  const groupMatches = divisionMatches.filter((m) => m.stage === "group");
+  const unconfirmed = groupMatches.filter((m) => m.status !== "confirmed");
+  if (unconfirmed.length > 0) {
+    return {
+      error: `조별리그 경기 ${unconfirmed.length}건이 아직 확정되지 않았습니다. 모두 확정한 후 다시 시도해주세요.`,
+    };
+  }
+
+  const teamsSnap = await teamsCol(tournament.id).get();
+  const teams = teamsSnap.docs.map((d) => d.data()).filter((t) => t.division === division);
+  const standingsByGroup = computeGroupStandings(teams, groupMatches);
+  const bracketResult = buildDivisionKnockout(standingsByGroup, REGENERATE_ADVANCE_COUNT);
+  if ("error" in bracketResult) return { error: bracketResult.error };
+
+  const deleteOps: BatchOp[] = divisionMatches
+    .filter((m) => m.stage === "knockout")
+    .map((m) => (batch) => batch.delete(matchDoc(tournament.id, m.id)));
+  await commitInChunks(deleteOps);
+
+  const { matchCount } = await commitKnockoutBracket(tournament.id, division, bracketResult, Date.now());
+
+  revalidatePath("/admin/standings");
+  revalidatePath("/admin/matches");
   return { warnings: bracketResult.warnings, matchCount };
 }
 

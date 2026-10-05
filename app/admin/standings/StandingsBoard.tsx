@@ -5,6 +5,7 @@ import {
   getDivisionStandings,
   generateKnockoutBracket,
   setDivisionLeague,
+  regenerateKnockoutBracket,
   type DivisionStandingsResult,
   type GenerateBracketResult,
 } from "@/app/actions/admin";
@@ -44,6 +45,21 @@ export default function StandingsBoard({
         const refreshed = await getDivisionStandings(division);
         setData(refreshed);
       }
+    });
+  }
+
+  function handleRegenerate() {
+    const played = data.knockoutPlayedCount;
+    const message =
+      played > 0
+        ? `이미 점수가 입력된 본선 경기 ${played}건의 결과가 모두 삭제됩니다. 현재 조별리그 순위로 본선 대진을 다시 만들까요?`
+        : "현재 조별리그 순위로 본선 대진을 다시 만들까요?";
+    if (!window.confirm(message)) return;
+    setGenerateResult(null);
+    startTransition(async () => {
+      const res = await regenerateKnockoutBracket(division);
+      setGenerateResult(res);
+      setData(await getDivisionStandings(division));
     });
   }
 
@@ -155,9 +171,27 @@ export default function StandingsBoard({
       {!data.isLeague && (
         <div className="rounded-lg border border-neutral-200 p-4">
           {data.knockoutGenerated ? (
-            <p className="text-sm text-emerald-700">
-              이미 이 부문의 토너먼트 대진이 생성되었습니다. 경기 현황에서 확인하세요.
-            </p>
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-emerald-700">
+                이미 이 부문의 토너먼트 대진이 생성되었습니다. 경기 현황에서 확인하세요.
+              </p>
+              <p className="text-sm text-neutral-500">
+                조별리그 점수를 고쳐서 순위가 바뀌었다면 본선 대진을 다시 만들 수 있습니다.
+                {data.knockoutPlayedCount > 0 &&
+                  ` 이미 점수가 입력된 본선 경기 ${data.knockoutPlayedCount}건의 결과는 삭제됩니다.`}
+              </p>
+              {generateResult?.error && <p className="text-sm text-red-600">{generateResult.error}</p>}
+              {generateResult && !generateResult.error && (
+                <p className="text-sm text-emerald-700">본선 대진을 다시 만들었습니다.</p>
+              )}
+              <button
+                onClick={handleRegenerate}
+                disabled={pending}
+                className="w-fit rounded-lg border border-red-300 px-4 py-3 text-sm font-medium text-red-600 disabled:opacity-50"
+              >
+                {pending ? "처리 중..." : "본선 대진 다시 만들기"}
+              </button>
+            </div>
           ) : (
             <div className="flex flex-col gap-3">
               <p className="text-sm font-medium text-neutral-700">토너먼트 대진 생성</p>

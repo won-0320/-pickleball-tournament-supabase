@@ -195,9 +195,18 @@ export default function UploadWizard() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <label htmlFor="file" className="text-sm font-medium text-neutral-700">
-          팀 명단 파일 (.xlsx, .csv)
-        </label>
+        <div className="flex items-center justify-between">
+          <label htmlFor="file" className="text-sm font-medium text-neutral-700">
+            팀 명단 파일 (.xlsx, .csv)
+          </label>
+          <a
+            href="/roster-template.xlsx"
+            download="팀명단_양식.xlsx"
+            className="text-sm text-neutral-600 underline"
+          >
+            양식 다운로드
+          </a>
+        </div>
         <input
           id="file"
           name="file"

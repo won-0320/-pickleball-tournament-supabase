@@ -1,6 +1,4 @@
-import type { DocumentReference } from "firebase-admin/firestore";
-import { matchesCol } from "@/lib/firebase/collections";
-import { commitInChunks, type BatchOp } from "@/lib/firebase/batchWrite";
+import { insertMatches, newId } from "@/lib/supabase/repo";
 import type { KnockoutBracketDraft } from "./knockoutBracket";
 import type { Match, MatchSide } from "@/types/domain";
 
@@ -9,9 +7,9 @@ export interface CommitKnockoutBracketResult {
 }
 
 /**
- * Writes a pure KnockoutBracketDraft to Firestore: pre-allocates a doc ref
+ * Writes a pure KnockoutBracketDraft to the database: pre-allocates an id
  * for every (roundIndex, slotIndex) so nextMatchId can point forward, then
- * batch-writes every match with its stage/bye/advancement-linkage fields.
+ * bulk-inserts every match with its stage/bye/advancement-linkage fields.
  */
 export async function commitKnockoutBracket(
   tournamentId: string,
@@ -19,31 +17,31 @@ export async function commitKnockoutBracket(
   draft: KnockoutBracketDraft,
   now: number
 ): Promise<CommitKnockoutBracketResult> {
-  const refByKey = new Map<string, DocumentReference<Match>>();
+  const idByKey = new Map<string, string>();
 
   for (const m of draft.matches) {
-    refByKey.set(`${m.roundIndex}:${m.slotIndex}`, matchesCol(tournamentId).doc());
+    idByKey.set(`${m.roundIndex}:${m.slotIndex}`, newId());
   }
 
-  const ops: BatchOp[] = [];
+  const matches: Match[] = [];
 
   for (const m of draft.matches) {
-    const ref = refByKey.get(`${m.roundIndex}:${m.slotIndex}`)!;
+    const id = idByKey.get(`${m.roundIndex}:${m.slotIndex}`)!;
 
     const isFinalRound = m.roundIndex === draft.roundCount - 1;
     let nextMatchId: string | null = null;
     let nextMatchSlot: MatchSide | null = null;
     if (!isFinalRound) {
       const nextSlotIndex = Math.floor(m.slotIndex / 2);
-      const nextRef = refByKey.get(`${m.roundIndex + 1}:${nextSlotIndex}`);
-      if (nextRef) {
-        nextMatchId = nextRef.id;
+      const nextId = idByKey.get(`${m.roundIndex + 1}:${nextSlotIndex}`);
+      if (nextId) {
+        nextMatchId = nextId;
         nextMatchSlot = m.slotIndex % 2 === 0 ? "teamA" : "teamB";
       }
     }
 
     const match: Match = {
-      id: ref.id,
+      id,
       tournamentId,
       division,
       stage: "knockout",
@@ -71,10 +69,10 @@ export async function commitKnockoutBracket(
       createdAt: now,
       updatedAt: now,
     };
-    ops.push((batch) => batch.set(ref, match));
+    matches.push(match);
   }
 
-  await commitInChunks(ops);
+  await insertMatches(matches);
 
   return { matchCount: draft.matches.length };
 }

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 // Lightweight presence-only guard. Every Server Action still re-verifies the
-// signed session cookie (see lib/session/*) before touching Firestore — this
+// signed session cookie (see lib/session/*) before touching the database — this
 // proxy just avoids flashing protected pages to obviously-unauthenticated
 // visitors and redirects them to the right entry point.
 export function proxy(request: NextRequest) {

@@ -10,9 +10,9 @@ import { useRouter } from "next/navigation";
  * visible again, which covers the common "switched apps to check the score,
  * came back" case cheaply.
  *
- * Every refresh re-reads Firestore on the server, so polling is skipped while
+ * Every refresh re-reads the database on the server, so polling is skipped while
  * the page is hidden (screen off, other app/tab in front) — otherwise phones
- * left open on this page burn through the Firestore read quota.
+ * left open on this page keep hammering the database.
  */
 export function usePolling(intervalMs = 20000) {
   const router = useRouter();

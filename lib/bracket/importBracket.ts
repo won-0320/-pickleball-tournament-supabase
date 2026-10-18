@@ -1,5 +1,12 @@
-import { tournamentsCol, teamsCol, matchesCol } from "@/lib/firebase/collections";
-import { commitInChunks, type BatchOp } from "@/lib/firebase/batchWrite";
+import {
+  deleteTournament,
+  insertMatches,
+  insertTeams,
+  insertTournament,
+  listTournaments,
+  newId,
+  updateTournament,
+} from "@/lib/supabase/repo";
 import { generateRoundRobinMatches } from "./roundRobin";
 import type { RosterTeamDraft } from "./parseBracket";
 import type { Match, Team, Tournament } from "@/types/domain";
@@ -40,8 +47,8 @@ function generateCode(used: Set<string>): string {
 }
 
 /**
- * Commits a parsed roster to Firestore as a brand-new tournament: creates a
- * team doc per row, then auto-generates every round-robin match within each
+ * Commits a parsed roster to the database as a brand-new tournament: creates a
+ * team row per entry, then auto-generates every round-robin match within each
  * (division, group) pair. Closes any previously active tournament so
  * exactly one stays "active" (and therefore reachable via team codes) at a
  * time.
@@ -52,23 +59,23 @@ export async function importBracket(
   const now = Date.now();
   const usedCodes = new Set<string>();
 
-  const activeSnap = await tournamentsCol().where("status", "==", "active").get();
+  const activeTournaments = await listTournaments("active");
 
-  const tournamentRef = tournamentsCol().doc();
-  const tournamentId = tournamentRef.id;
+  const tournamentId = newId();
 
-  const ops: BatchOp[] = [];
+  const teams: Team[] = [];
+  const matches: Match[] = [];
 
   const teamRefs = new Map<string, { id: string; name: string; code: string }>();
   const importedTeams: ImportedTeam[] = [];
 
   for (const draft of input.teams) {
-    const ref = teamsCol(tournamentId).doc();
+    const id = newId();
     const code = generateCode(usedCodes);
-    teamRefs.set(draft.key, { id: ref.id, name: draft.teamName, code });
+    teamRefs.set(draft.key, { id, name: draft.teamName, code });
 
-    const team: Team = {
-      id: ref.id,
+    teams.push({
+      id,
       tournamentId,
       code,
       division: draft.division,
@@ -77,10 +84,9 @@ export async function importBracket(
       player1: draft.player1,
       player2: draft.player2,
       createdAt: now,
-    };
-    ops.push((batch) => batch.set(ref, team));
+    });
     importedTeams.push({
-      id: ref.id,
+      id,
       code,
       division: draft.division,
       group: draft.group,
@@ -113,9 +119,8 @@ export async function importBracket(
       const teamB = teamRefs.get(draft.teamBKey);
       if (!teamA || !teamB) continue; // defensive: should not happen if drafts are consistent
 
-      const ref = matchesCol(tournamentId).doc();
-      const match: Match = {
-        id: ref.id,
+      matches.push({
+        id: newId(),
         tournamentId,
         division: draft.division,
         stage: "group",
@@ -142,8 +147,7 @@ export async function importBracket(
         nextMatchSlot: null,
         createdAt: now,
         updatedAt: now,
-      };
-      ops.push((batch) => batch.set(ref, match));
+      });
       matchCount += 1;
     }
   }
@@ -157,13 +161,23 @@ export async function importBracket(
     createdAt: now,
     bracketUploadedAt: now,
   };
-  ops.push((batch) => batch.set(tournamentRef, tournament));
 
-  for (const doc of activeSnap.docs) {
-    ops.push((batch) => batch.update(doc.ref, { status: "closed" }));
+  // 새 대회를 draft로 넣고 팀·경기까지 다 들어가면 active로 바꾼 뒤 기존 활성
+  // 대회를 닫는다. 그래서 반쯤 만든 대회가 참가자에게 보이지 않는다. 중간에
+  // 실패하면 새 대회를 지운다 (cascade로 팀·경기까지).
+  await insertTournament({ ...tournament, status: "draft" });
+  try {
+    await insertTeams(teams);
+    await insertMatches(matches);
+    await updateTournament(tournamentId, { status: "active" });
+  } catch (e) {
+    await deleteTournament(tournamentId).catch(() => {});
+    throw e;
   }
 
-  await commitInChunks(ops);
+  for (const t of activeTournaments) {
+    await updateTournament(t.id, { status: "closed" });
+  }
 
   return { tournamentId, teams: importedTeams, matchCount };
 }

@@ -22,17 +22,7 @@ import { buildDivisionKnockout } from "@/lib/bracket/divisionKnockout";
 import { commitKnockoutBracket } from "@/lib/bracket/commitKnockoutBracket";
 import { computeGroupStandings, type TeamStanding } from "@/lib/standings/standings";
 import { computePodium, type PodiumEntry } from "@/lib/standings/podium";
-import { getDb } from "@/lib/firebase/admin";
-import {
-  getActiveTournament,
-  tournamentsCol,
-  tournamentDoc,
-  teamsCol,
-  teamDoc,
-  matchesCol,
-  matchDoc,
-} from "@/lib/firebase/collections";
-import { commitInChunks, type BatchOp } from "@/lib/firebase/batchWrite";
+import * as db from "@/lib/supabase/repo";
 import {
   resolveDispute as resolveDisputeFlow,
   overrideScore as overrideScoreFlow,
@@ -215,15 +205,12 @@ export async function listTeams(): Promise<ListTeamsResult> {
     return { authError: "관리자 인증이 필요합니다.", tournament: null, teams: [] };
   }
 
-  const tournament = await getActiveTournament();
+  const tournament = await db.getActiveTournament();
   if (!tournament) {
     return { tournament: null, teams: [] };
   }
 
-  const snap = await teamsCol(tournament.id).get();
-  const teams = snap.docs
-    .map((d) => d.data())
-    .sort(
+  const teams = (await db.listTeams(tournament.id)).sort(
       (a, b) =>
         a.division.localeCompare(b.division) || a.teamName.localeCompare(b.teamName)
     );
@@ -254,13 +241,12 @@ export async function listMatches(
     return { authError: "관리자 인증이 필요합니다.", tournament: null, matches: [] };
   }
 
-  const tournament = await getActiveTournament();
+  const tournament = await db.getActiveTournament();
   if (!tournament) {
     return { tournament: null, matches: [] };
   }
 
-  const snap = await matchesCol(tournament.id).get();
-  let matches = snap.docs.map((d) => d.data());
+  let matches = await db.listMatches(tournament.id);
 
   if (filters.division) {
     matches = matches.filter((m) => m.division === filters.division);
@@ -297,19 +283,18 @@ export async function getAdminMatch(matchId: string): Promise<AdminMatchResult> 
   const admin = await isAdminSession();
   if (!admin) return { authError: "관리자 인증이 필요합니다." };
 
-  const tournament = await getActiveTournament();
+  const tournament = await db.getActiveTournament();
   if (!tournament) return { authError: "활성화된 대회가 없습니다." };
 
-  const matchSnap = await matchDoc(tournament.id, matchId).get();
-  const match = matchSnap.data();
+  const match = await db.getMatch(tournament.id, matchId);
   if (!match) return { authError: "경기를 찾을 수 없습니다." };
 
-  const [teamASnap, teamBSnap] = await Promise.all([
-    match.teamAId ? teamDoc(tournament.id, match.teamAId).get() : Promise.resolve(null),
-    match.teamBId ? teamDoc(tournament.id, match.teamBId).get() : Promise.resolve(null),
+  const [teamA, teamB] = await Promise.all([
+    match.teamAId ? db.getTeam(tournament.id, match.teamAId) : Promise.resolve(null),
+    match.teamBId ? db.getTeam(tournament.id, match.teamBId) : Promise.resolve(null),
   ]);
 
-  return { match, teamA: teamASnap?.data(), teamB: teamBSnap?.data() };
+  return { match, teamA: teamA ?? undefined, teamB: teamB ?? undefined };
 }
 
 export interface ResolveDisputeState {
@@ -324,18 +309,16 @@ export async function resolveMatchDispute(
   const admin = await isAdminSession();
   if (!admin) return { error: "관리자 인증이 필요합니다." };
 
-  const tournament = await getActiveTournament();
+  const tournament = await db.getActiveTournament();
   if (!tournament) return { error: "활성화된 대회가 없습니다." };
 
-  const ref = matchDoc(tournament.id, matchId);
-  const snap = await ref.get();
-  const match = snap.data();
+  const match = await db.getMatch(tournament.id, matchId);
   if (!match) return { error: "경기를 찾을 수 없습니다." };
 
   const result = resolveDisputeFlow(match, finalScoreA, finalScoreB, Date.now());
   if (!result.ok) return { error: result.error.message };
 
-  await ref.update(result.patch);
+  await db.updateMatch(tournament.id, matchId, result.patch);
   await applyCascadingAdvancement(tournament.id, { ...match, ...result.patch });
   if (match.stage === "group") {
     await autoGenerateKnockoutBracket(tournament.id, match.division);
@@ -354,18 +337,16 @@ export async function overrideMatchScore(
   const admin = await isAdminSession();
   if (!admin) return { error: "관리자 인증이 필요합니다." };
 
-  const tournament = await getActiveTournament();
+  const tournament = await db.getActiveTournament();
   if (!tournament) return { error: "활성화된 대회가 없습니다." };
 
-  const ref = matchDoc(tournament.id, matchId);
-  const snap = await ref.get();
-  const match = snap.data();
+  const match = await db.getMatch(tournament.id, matchId);
   if (!match) return { error: "경기를 찾을 수 없습니다." };
 
   const result = overrideScoreFlow(match, finalScoreA, finalScoreB, Date.now());
   if (!result.ok) return { error: result.error.message };
 
-  await ref.update(result.patch);
+  await db.updateMatch(tournament.id, matchId, result.patch);
   await applyCascadingAdvancement(tournament.id, { ...match, ...result.patch });
   if (match.stage === "group") {
     await autoGenerateKnockoutBracket(tournament.id, match.division);
@@ -380,21 +361,19 @@ export async function resetMatch(matchId: string): Promise<ResolveDisputeState> 
   const admin = await isAdminSession();
   if (!admin) return { error: "관리자 인증이 필요합니다." };
 
-  const tournament = await getActiveTournament();
+  const tournament = await db.getActiveTournament();
   if (!tournament) return { error: "활성화된 대회가 없습니다." };
 
-  const ref = matchDoc(tournament.id, matchId);
-  const match = (await ref.get()).data();
+  const match = await db.getMatch(tournament.id, matchId);
   if (!match) return { error: "경기를 찾을 수 없습니다." };
   if (match.isBye) return { error: "부전승 경기는 초기화할 수 없습니다." };
 
-  const ops: BatchOp[] = [];
+  let nextSlotReset: { nextMatchId: string; patch: Partial<Match> } | null = null;
 
   // 토너먼트 경기면 다음 라운드로 올라간 승자도 되돌린다. 다음 경기가 이미
   // 진행됐다면 결과가 꼬이므로 막는다.
   if (match.nextMatchId && match.nextMatchSlot && match.status === "confirmed") {
-    const nextRef = matchDoc(tournament.id, match.nextMatchId);
-    const next = (await nextRef.get()).data();
+    const next = await db.getMatch(tournament.id, match.nextMatchId);
     if (next) {
       if (next.status !== "pending") {
         return { error: "다음 라운드 경기가 이미 진행되어 이 경기를 초기화할 수 없습니다. 다음 경기부터 초기화해주세요." };
@@ -403,25 +382,28 @@ export async function resetMatch(matchId: string): Promise<ResolveDisputeState> 
         match.nextMatchSlot === "teamA"
           ? { teamAId: null, teamAName: null }
           : { teamBId: null, teamBName: null };
-      ops.push((batch) => batch.update(nextRef, { ...slotPatch, updatedAt: Date.now() }));
+      nextSlotReset = {
+        nextMatchId: match.nextMatchId,
+        patch: { ...slotPatch, updatedAt: Date.now() },
+      };
     }
   }
 
-  ops.push((batch) =>
-    batch.update(ref, {
-      status: "pending",
-      scoreA: null,
-      scoreB: null,
-      submittedBy: null,
-      submittedScoreA: null,
-      submittedScoreB: null,
-      opponentScoreA: null,
-      opponentScoreB: null,
-      resolvedBy: null,
-      updatedAt: Date.now(),
-    })
-  );
-  await commitInChunks(ops);
+  if (nextSlotReset) {
+    await db.updateMatch(tournament.id, nextSlotReset.nextMatchId, nextSlotReset.patch);
+  }
+  await db.updateMatch(tournament.id, matchId, {
+    status: "pending",
+    scoreA: null,
+    scoreB: null,
+    submittedBy: null,
+    submittedScoreA: null,
+    submittedScoreB: null,
+    opponentScoreA: null,
+    opponentScoreB: null,
+    resolvedBy: null,
+    updatedAt: Date.now(),
+  });
 
   revalidatePath("/admin/matches");
   revalidatePath(`/admin/matches/${matchId}`);
@@ -464,7 +446,7 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
     };
   }
 
-  const tournament = await getActiveTournament();
+  const tournament = await db.getActiveTournament();
   if (!tournament) {
     return {
       error: "활성화된 대회가 없습니다.",
@@ -478,15 +460,12 @@ export async function getDivisionStandings(division: string): Promise<DivisionSt
     };
   }
 
-  const [teamsSnap, matchesSnap] = await Promise.all([
-    teamsCol(tournament.id).get(),
-    matchesCol(tournament.id).get(),
+  const [allTeams, divisionMatches] = await Promise.all([
+    db.listTeams(tournament.id),
+    db.listMatches(tournament.id, { divisions: [division] }),
   ]);
 
-  const allTeams = teamsSnap.docs.map((d) => d.data());
   const teams = allTeams.filter((t) => t.division === division);
-  const allMatches = matchesSnap.docs.map((d) => d.data());
-  const divisionMatches = allMatches.filter((m) => m.division === division);
   const groupMatches = divisionMatches.filter((m) => m.stage === "group");
   const knockoutGenerated = divisionMatches.some((m) => m.stage === "knockout");
   const knockoutPlayedCount = divisionMatches.filter(
@@ -528,14 +507,12 @@ export async function setDivisionLeague(
   const admin = await isAdminSession();
   if (!admin) return { error: "관리자 인증이 필요합니다." };
 
-  const tournament = await getActiveTournament();
+  const tournament = await db.getActiveTournament();
   if (!tournament) return { error: "활성화된 대회가 없습니다." };
 
   if (league) {
-    const matchesSnap = await matchesCol(tournament.id).get();
-    const knockoutAlready = matchesSnap.docs.some(
-      (d) => d.data().division === division && d.data().stage === "knockout"
-    );
+    const divisionMatches = await db.listMatches(tournament.id, { divisions: [division] });
+    const knockoutAlready = divisionMatches.some((m) => m.stage === "knockout");
     if (knockoutAlready) {
       return { error: "이미 토너먼트 대진이 생성된 부문은 리그전으로 바꿀 수 없습니다." };
     }
@@ -545,7 +522,7 @@ export async function setDivisionLeague(
   const next = league
     ? Array.from(new Set([...current, division])).sort()
     : current.filter((d) => d !== division);
-  await tournamentDoc(tournament.id).update({ leagueDivisions: next });
+  await db.updateTournament(tournament.id, { leagueDivisions: next });
 
   // 리그전을 해제했는데 조별리그가 이미 다 끝나 있으면 바로 토너먼트를 생성.
   if (!league) {
@@ -574,12 +551,10 @@ export async function generateKnockoutBracket(
     return { error: "진출 인원수는 1 이상의 정수여야 합니다." };
   }
 
-  const tournament = await getActiveTournament();
+  const tournament = await db.getActiveTournament();
   if (!tournament) return { error: "활성화된 대회가 없습니다." };
 
-  const matchesSnap = await matchesCol(tournament.id).get();
-  const allMatches = matchesSnap.docs.map((d) => d.data());
-  const divisionMatches = allMatches.filter((m) => m.division === division);
+  const divisionMatches = await db.listMatches(tournament.id, { divisions: [division] });
 
   if (tournament.leagueDivisions?.includes(division)) {
     return { error: "리그전 부문은 토너먼트 대진을 생성하지 않습니다." };
@@ -597,8 +572,7 @@ export async function generateKnockoutBracket(
     };
   }
 
-  const teamsSnap = await teamsCol(tournament.id).get();
-  const teams = teamsSnap.docs.map((d) => d.data()).filter((t) => t.division === division);
+  const teams = await db.listTeams(tournament.id, { division });
   if (teams.length === 0) {
     return { error: "이 부문에 등록된 팀이 없습니다." };
   }
@@ -630,14 +604,13 @@ export async function regenerateKnockoutBracket(division: string): Promise<Gener
   const admin = await isAdminSession();
   if (!admin) return { error: "관리자 인증이 필요합니다." };
 
-  const tournament = await getActiveTournament();
+  const tournament = await db.getActiveTournament();
   if (!tournament) return { error: "활성화된 대회가 없습니다." };
   if (tournament.leagueDivisions?.includes(division)) {
     return { error: "리그전 부문은 토너먼트 대진을 생성하지 않습니다." };
   }
 
-  const matchesSnap = await matchesCol(tournament.id).get();
-  const divisionMatches = matchesSnap.docs.map((d) => d.data()).filter((m) => m.division === division);
+  const divisionMatches = await db.listMatches(tournament.id, { divisions: [division] });
   const groupMatches = divisionMatches.filter((m) => m.stage === "group");
   const unconfirmed = groupMatches.filter((m) => m.status !== "confirmed");
   if (unconfirmed.length > 0) {
@@ -646,16 +619,15 @@ export async function regenerateKnockoutBracket(division: string): Promise<Gener
     };
   }
 
-  const teamsSnap = await teamsCol(tournament.id).get();
-  const teams = teamsSnap.docs.map((d) => d.data()).filter((t) => t.division === division);
+  const teams = await db.listTeams(tournament.id, { division });
   const standingsByGroup = computeGroupStandings(teams, groupMatches);
   const bracketResult = buildDivisionKnockout(standingsByGroup, REGENERATE_ADVANCE_COUNT);
   if ("error" in bracketResult) return { error: bracketResult.error };
 
-  const deleteOps: BatchOp[] = divisionMatches
-    .filter((m) => m.stage === "knockout")
-    .map((m) => (batch) => batch.delete(matchDoc(tournament.id, m.id)));
-  await commitInChunks(deleteOps);
+  await db.deleteMatches(
+    tournament.id,
+    divisionMatches.filter((m) => m.stage === "knockout").map((m) => m.id)
+  );
 
   const { matchCount } = await commitKnockoutBracket(tournament.id, division, bracketResult, Date.now());
 
@@ -680,22 +652,21 @@ export async function listTournaments(): Promise<{
   const admin = await isAdminSession();
   if (!admin) return { authError: "관리자 인증이 필요합니다.", tournaments: [] };
 
-  const snap = await tournamentsCol().get();
+  const all = await db.listTournaments();
   const tournaments = await Promise.all(
-    snap.docs.map(async (doc) => {
-      const t = doc.data();
-      // 개수만 필요하므로 문서를 전부 읽지 않고 count 집계를 쓴다 (읽기 할당량 절약).
-      const [teamsCount, matchesCount] = await Promise.all([
-        teamsCol(t.id).count().get(),
-        matchesCol(t.id).count().get(),
+    all.map(async (t) => {
+      // 개수만 필요하므로 행을 전부 읽지 않고 count만 받는다.
+      const [teamCount, matchCount] = await Promise.all([
+        db.countTeams(t.id),
+        db.countMatches(t.id),
       ]);
       return {
         id: t.id,
         name: t.name,
         status: t.status,
         createdAt: t.createdAt,
-        teamCount: teamsCount.data().count,
-        matchCount: matchesCount.data().count,
+        teamCount,
+        matchCount,
       };
     })
   );
@@ -712,7 +683,7 @@ export async function deleteTournament(tournamentId: string): Promise<DeleteTour
   const admin = await isAdminSession();
   if (!admin) return { error: "관리자 인증이 필요합니다." };
 
-  await getDb().recursiveDelete(tournamentDoc(tournamentId));
+  await db.deleteTournament(tournamentId);
 
   revalidatePath("/admin/tournaments");
   revalidatePath("/admin/teams");
@@ -764,15 +735,13 @@ export async function addTeam(input: AddTeamInput): Promise<AddTeamResult> {
 
   const teamName = deriveTeamName(player1, player2);
 
-  const tournament = await getActiveTournament();
+  const tournament = await db.getActiveTournament();
   if (!tournament) return { error: "활성화된 대회가 없습니다." };
 
-  const [teamsSnap, matchesSnap] = await Promise.all([
-    teamsCol(tournament.id).get(),
-    matchesCol(tournament.id).get(),
+  const [allTeams, allMatches] = await Promise.all([
+    db.listTeams(tournament.id),
+    db.listMatches(tournament.id, { divisions: [division] }),
   ]);
-  const allTeams = teamsSnap.docs.map((d) => d.data());
-  const allMatches = matchesSnap.docs.map((d) => d.data());
 
   const knockoutAlready = allMatches.some(
     (m) => m.division === division && m.stage === "knockout"
@@ -802,10 +771,9 @@ export async function addTeam(input: AddTeamInput): Promise<AddTeamResult> {
   const code = generateTeamCode(usedCodes);
   const now = Date.now();
 
-  const ops: BatchOp[] = [];
-  const teamRef = teamsCol(tournament.id).doc();
+  const teamId = db.newId();
   const team: Team = {
-    id: teamRef.id,
+    id: teamId,
     tournamentId: tournament.id,
     code,
     division,
@@ -815,7 +783,7 @@ export async function addTeam(input: AddTeamInput): Promise<AddTeamResult> {
     player2,
     createdAt: now,
   };
-  ops.push((batch) => batch.set(teamRef, team));
+  const newMatches: Match[] = [];
 
   const newMatchDrafts = generateMatchesForNewTeam(
     division,
@@ -829,7 +797,7 @@ export async function addTeam(input: AddTeamInput): Promise<AddTeamResult> {
   for (const t of groupTeams) {
     teamIdByKey.set(teamKey(t.division, t.group ?? "", t.teamName), t.id);
   }
-  teamIdByKey.set(newKey, teamRef.id);
+  teamIdByKey.set(newKey, teamId);
 
   let matchCount = 0;
   for (const draft of newMatchDrafts) {
@@ -837,9 +805,8 @@ export async function addTeam(input: AddTeamInput): Promise<AddTeamResult> {
     const teamBId = teamIdByKey.get(draft.teamBKey);
     if (!teamAId || !teamBId) continue;
 
-    const matchRef = matchesCol(tournament.id).doc();
-    const match: Match = {
-      id: matchRef.id,
+    newMatches.push({
+      id: db.newId(),
       tournamentId: tournament.id,
       division,
       stage: "group",
@@ -866,27 +833,24 @@ export async function addTeam(input: AddTeamInput): Promise<AddTeamResult> {
       nextMatchSlot: null,
       createdAt: now,
       updatedAt: now,
-    };
-    ops.push((batch) => batch.set(matchRef, match));
+    });
     matchCount += 1;
   }
 
+  await db.insertTeams([team]);
+  await db.insertMatches(newMatches);
   if (!tournament.divisions.includes(division)) {
-    ops.push((batch) =>
-      batch.update(tournamentDoc(tournament.id), {
-        divisions: [...tournament.divisions, division].sort(),
-      })
-    );
+    await db.updateTournament(tournament.id, {
+      divisions: [...tournament.divisions, division].sort(),
+    });
   }
-
-  await commitInChunks(ops);
 
   revalidatePath("/admin/teams");
   revalidatePath("/admin/standings");
   revalidatePath("/admin/matches");
 
   return {
-    team: { id: teamRef.id, code, division, group, teamName, player1, player2 },
+    team: { id: teamId, code, division, group, teamName, player1, player2 },
     matchCount,
   };
 }

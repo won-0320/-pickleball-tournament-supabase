@@ -1,4 +1,4 @@
-import { matchDoc } from "@/lib/firebase/collections";
+import { updateMatch } from "@/lib/supabase/repo";
 import type { Match } from "@/types/domain";
 
 export interface Winner {
@@ -58,5 +58,5 @@ export async function applyCascadingAdvancement(
       ? { teamAId: winner.teamId, teamAName: winner.teamName }
       : { teamBId: winner.teamId, teamBName: winner.teamName };
 
-  await matchDoc(tournamentId, match.nextMatchId).update(patch);
+  await updateMatch(tournamentId, match.nextMatchId, patch);
 }

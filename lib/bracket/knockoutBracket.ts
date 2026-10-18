@@ -94,7 +94,7 @@ function resolveGroupCollisions(pairs: [Slot, Slot][]): string[] {
 }
 
 /**
- * Builds a full knockout bracket draft (pure — no Firestore I/O) from a
+ * Builds a full knockout bracket draft (pure — no database I/O) from a
  * seeded, ordered list of advancing teams. Round 1 gets real matchups
  * (with byes for top seeds if the seed count isn't a power of two); every
  * later round is a placeholder ("TBD vs TBD") except where a round-1 bye's

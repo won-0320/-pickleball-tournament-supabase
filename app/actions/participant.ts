@@ -3,13 +3,16 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
+  findTeamByCode,
   getActiveTournament,
-  tournamentDoc,
-  teamsCol,
-  teamDoc,
-  matchesCol,
-  matchDoc,
-} from "@/lib/firebase/collections";
+  getMatch,
+  getTeam,
+  getTournament,
+  listMatches,
+  listTeams,
+  updateMatch,
+  updateMatchIfUnchanged,
+} from "@/lib/supabase/repo";
 import { createTeamSession, destroyTeamSession, getTeamSession } from "@/lib/session/teamSession";
 import {
   submitScore as submitScoreFlow,
@@ -43,16 +46,11 @@ export async function joinWithCode(
     return { error: "진행 중인 대회가 없습니다. 관리자에게 문의해주세요." };
   }
 
-  const snap = await teamsCol(tournament.id)
-    .where("code", "==", code)
-    .limit(1)
-    .get();
-
-  if (snap.empty) {
+  const team = await findTeamByCode(tournament.id, code);
+  if (!team) {
     return { error: "코드를 찾을 수 없습니다. 코드를 다시 확인해주세요." };
   }
 
-  const team = snap.docs[0]!.data();
   await createTeamSession({ tournamentId: tournament.id, teamId: team.id });
   redirect(`/team/${team.id}`);
 }
@@ -86,17 +84,12 @@ export async function getMyMatches(): Promise<MyMatchesResult> {
     return { error: "세션이 만료되었습니다. 다시 코드를 입력해주세요.", matches: [] };
   }
 
-  const teamSnap = await teamDoc(session.tournamentId, session.teamId).get();
-  const team = teamSnap.data();
+  const team = await getTeam(session.tournamentId, session.teamId);
   if (!team) {
     return { error: "팀 정보를 찾을 수 없습니다.", matches: [] };
   }
 
-  const [asA, asB] = await Promise.all([
-    matchesCol(session.tournamentId).where("teamAId", "==", session.teamId).get(),
-    matchesCol(session.tournamentId).where("teamBId", "==", session.teamId).get(),
-  ]);
-  const matches = [...asA.docs, ...asB.docs].map((d) => d.data());
+  const matches = await listMatches(session.tournamentId, { teamId: session.teamId });
   matches.sort(
     (a, b) =>
       a.stage.localeCompare(b.stage) ||
@@ -121,25 +114,21 @@ export async function getMyDivisionView(): Promise<MyDivisionView | null> {
   const session = await getTeamSession();
   if (!session) return null;
 
-  const [tournamentSnap, teamSnap] = await Promise.all([
-    tournamentDoc(session.tournamentId).get(),
-    teamDoc(session.tournamentId, session.teamId).get(),
+  const [tournament, team] = await Promise.all([
+    getTournament(session.tournamentId),
+    getTeam(session.tournamentId, session.teamId),
   ]);
-  const team = teamSnap.data();
   if (!team) return null;
 
-  // 이 페이지는 몇 초마다 다시 그려지므로 대회 전체가 아니라 필요한 부문만 읽는다
-  // (Firestore 읽기 할당량 절약).
-  const [teamsSnap, matchesSnap] = await Promise.all([
-    teamsCol(session.tournamentId).where("division", "==", team.division).get(),
-    matchesCol(session.tournamentId).where("division", "in", divisionsNeededFor(team.division)).get(),
+  // 이 페이지는 몇 초마다 다시 그려지므로 대회 전체가 아니라 필요한 부문만 읽는다.
+  const [teams, allMatches] = await Promise.all([
+    listTeams(session.tournamentId, { division: team.division }),
+    listMatches(session.tournamentId, { divisions: divisionsNeededFor(team.division) }),
   ]);
-  const teams = teamsSnap.docs.map((d) => d.data());
-  const allMatches = matchesSnap.docs.map((d) => d.data());
   const divisionMatches = allMatches.filter((m) => m.division === team.division);
   const groupMatches = divisionMatches.filter((m) => m.stage === "group");
   const standingsByGroup = computeGroupStandings(teams, groupMatches);
-  const isLeague = tournamentSnap.data()?.leagueDivisions?.includes(team.division) ?? false;
+  const isLeague = tournament?.leagueDivisions?.includes(team.division) ?? false;
 
   const myGroupMatches = groupMatches
     .filter((m) => m.group === team.group)
@@ -167,12 +156,10 @@ export async function getMyMatch(matchId: string): Promise<MatchDetailResult> {
     return { error: "세션이 만료되었습니다. 다시 코드를 입력해주세요." };
   }
 
-  const [matchSnap, teamSnap] = await Promise.all([
-    matchDoc(session.tournamentId, matchId).get(),
-    teamDoc(session.tournamentId, session.teamId).get(),
+  const [match, team] = await Promise.all([
+    getMatch(session.tournamentId, matchId),
+    getTeam(session.tournamentId, session.teamId),
   ]);
-  const match = matchSnap.data();
-  const team = teamSnap.data();
   if (!match || !team) {
     return { error: "경기 정보를 찾을 수 없습니다." };
   }
@@ -193,7 +180,7 @@ export interface ScoreActionState {
  * scoreOwn/scoreOpponent are always from the acting team's own perspective;
  * this function maps them onto the match's canonical teamA/teamB score
  * fields based on the session-derived side before handing off to the
- * Firestore-independent state machine in lib/matches/scoreFlow.ts.
+ * database-independent state machine in lib/matches/scoreFlow.ts.
  */
 export async function submitMatchScore(
   matchId: string,
@@ -203,9 +190,7 @@ export async function submitMatchScore(
   const session = await getTeamSession();
   if (!session) return { error: "세션이 만료되었습니다. 다시 코드를 입력해주세요." };
 
-  const ref = matchDoc(session.tournamentId, matchId);
-  const snap = await ref.get();
-  const match = snap.data();
+  const match = await getMatch(session.tournamentId, matchId);
   if (!match) return { error: "경기 정보를 찾을 수 없습니다." };
 
   let side: MatchSide;
@@ -219,7 +204,7 @@ export async function submitMatchScore(
   const result = submitScoreFlow(match, side, scoreA, scoreB, Date.now());
   if (!result.ok) return { error: result.error.message };
 
-  await ref.update(result.patch);
+  await updateMatch(session.tournamentId, matchId, result.patch);
   revalidatePath(`/team/${session.teamId}`);
   revalidatePath(`/team/${session.teamId}/match/${matchId}`);
   return { error: null };
@@ -227,7 +212,7 @@ export async function submitMatchScore(
 
 /**
  * 제출한 팀이 상대 확인 전에 자기 제출을 수정/취소. 읽은 뒤 상대가 먼저
- * 확인했으면 덮어쓰지 않도록 updateTime 전제조건으로 업데이트한다.
+ * 확인했으면 덮어쓰지 않도록 updatedAt이 읽을 때 그대로일 때만 업데이트한다.
  */
 async function changeOwnSubmission(
   matchId: string,
@@ -236,10 +221,8 @@ async function changeOwnSubmission(
   const session = await getTeamSession();
   if (!session) return { error: "세션이 만료되었습니다. 다시 코드를 입력해주세요." };
 
-  const ref = matchDoc(session.tournamentId, matchId);
-  const snap = await ref.get();
-  const match = snap.data();
-  if (!match || !snap.updateTime) return { error: "경기 정보를 찾을 수 없습니다." };
+  const match = await getMatch(session.tournamentId, matchId);
+  if (!match) return { error: "경기 정보를 찾을 수 없습니다." };
 
   let side: MatchSide;
   if (match.teamAId === session.teamId) side = "teamA";
@@ -249,9 +232,13 @@ async function changeOwnSubmission(
   const result = apply(match, side);
   if (!result.ok) return { error: result.error.message };
 
-  try {
-    await ref.update(result.patch, { lastUpdateTime: snap.updateTime });
-  } catch {
+  const updated = await updateMatchIfUnchanged(
+    session.tournamentId,
+    matchId,
+    match.updatedAt,
+    result.patch
+  );
+  if (!updated) {
     return { error: "그 사이 상대팀이 점수를 확인했습니다. 화면을 새로고침해주세요." };
   }
   revalidatePath(`/team/${session.teamId}`);
@@ -283,9 +270,7 @@ export async function confirmMatchScore(
   const session = await getTeamSession();
   if (!session) return { error: "세션이 만료되었습니다. 다시 코드를 입력해주세요." };
 
-  const ref = matchDoc(session.tournamentId, matchId);
-  const snap = await ref.get();
-  const match = snap.data();
+  const match = await getMatch(session.tournamentId, matchId);
   if (!match) return { error: "경기 정보를 찾을 수 없습니다." };
 
   let side: MatchSide;
@@ -299,7 +284,7 @@ export async function confirmMatchScore(
   const result = confirmScoreFlow(match, side, scoreA, scoreB, Date.now());
   if (!result.ok) return { error: result.error.message };
 
-  await ref.update(result.patch);
+  await updateMatch(session.tournamentId, matchId, result.patch);
   await applyCascadingAdvancement(session.tournamentId, { ...match, ...result.patch });
   if (match.stage === "group") {
     await autoGenerateKnockoutBracket(session.tournamentId, match.division);

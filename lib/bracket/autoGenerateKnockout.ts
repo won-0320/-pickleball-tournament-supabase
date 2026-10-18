@@ -1,7 +1,7 @@
 import { buildDivisionKnockout } from "@/lib/bracket/divisionKnockout";
 import { commitKnockoutBracket } from "@/lib/bracket/commitKnockoutBracket";
 import { computeGroupStandings } from "@/lib/standings/standings";
-import { tournamentDoc, teamsCol, matchesCol } from "@/lib/firebase/collections";
+import { getTournament, listTeams, listMatches } from "@/lib/supabase/repo";
 
 const ADVANCE_COUNT = 2; // 고정: 조 1·2위 진출
 
@@ -21,11 +21,10 @@ export async function autoGenerateKnockoutBracket(
   division: string
 ): Promise<AutoGenerateKnockoutResult> {
   try {
-    const tournament = (await tournamentDoc(tournamentId).get()).data();
+    const tournament = await getTournament(tournamentId);
     if (tournament?.leagueDivisions?.includes(division)) return { generated: false }; // 리그전 부문은 토너먼트 없음
 
-    const matchesSnap = await matchesCol(tournamentId).get();
-    const divisionMatches = matchesSnap.docs.map((d) => d.data()).filter((m) => m.division === division);
+    const divisionMatches = await listMatches(tournamentId, { divisions: [division] });
 
     if (divisionMatches.some((m) => m.stage === "knockout")) return { generated: false }; // 이미 생성됨 (멱등성)
 
@@ -33,8 +32,7 @@ export async function autoGenerateKnockoutBracket(
     if (groupMatches.length === 0) return { generated: false };
     if (groupMatches.some((m) => m.status !== "confirmed")) return { generated: false }; // 아직 다 안 끝남
 
-    const teamsSnap = await teamsCol(tournamentId).get();
-    const teams = teamsSnap.docs.map((d) => d.data()).filter((t) => t.division === division);
+    const teams = await listTeams(tournamentId, { division });
     if (teams.length === 0) return { generated: false };
 
     const standingsByGroup = computeGroupStandings(teams, groupMatches);

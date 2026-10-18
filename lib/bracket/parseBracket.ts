@@ -33,7 +33,7 @@ function cell(row: RawRow, key: string): string {
 
 /**
  * Parses an uploaded team roster (xlsx/csv) into team drafts. Pure function
- * — does not touch Firestore. One row = one team; the app auto-generates
+ * — does not touch the database. One row = one team; the app auto-generates
  * every round-robin match within each (division, group) from this roster
  * (see lib/bracket/roundRobin.ts).
  */

@@ -22,7 +22,7 @@ import { applyCascadingAdvancement } from "@/lib/matches/advancement";
 import { autoGenerateKnockoutBracket } from "@/lib/bracket/autoGenerateKnockout";
 import { computeGroupStandings, type TeamStanding } from "@/lib/standings/standings";
 import { computePodium, type PodiumEntry } from "@/lib/standings/podium";
-import { divisionWait, type DivisionWait } from "@/lib/matches/divisionOrder";
+import { divisionWait, divisionsNeededFor, type DivisionWait } from "@/lib/matches/divisionOrder";
 import type { Match, MatchSide, Team } from "@/types/domain";
 
 export interface JoinState {
@@ -121,16 +121,20 @@ export async function getMyDivisionView(): Promise<MyDivisionView | null> {
   const session = await getTeamSession();
   if (!session) return null;
 
-  const [tournamentSnap, teamSnap, teamsSnap, matchesSnap] = await Promise.all([
+  const [tournamentSnap, teamSnap] = await Promise.all([
     tournamentDoc(session.tournamentId).get(),
     teamDoc(session.tournamentId, session.teamId).get(),
-    teamsCol(session.tournamentId).get(),
-    matchesCol(session.tournamentId).get(),
   ]);
   const team = teamSnap.data();
   if (!team) return null;
 
-  const teams = teamsSnap.docs.map((d) => d.data()).filter((t) => t.division === team.division);
+  // 이 페이지는 몇 초마다 다시 그려지므로 대회 전체가 아니라 필요한 부문만 읽는다
+  // (Firestore 읽기 할당량 절약).
+  const [teamsSnap, matchesSnap] = await Promise.all([
+    teamsCol(session.tournamentId).where("division", "==", team.division).get(),
+    matchesCol(session.tournamentId).where("division", "in", divisionsNeededFor(team.division)).get(),
+  ]);
+  const teams = teamsSnap.docs.map((d) => d.data());
   const allMatches = matchesSnap.docs.map((d) => d.data());
   const divisionMatches = allMatches.filter((m) => m.division === team.division);
   const groupMatches = divisionMatches.filter((m) => m.stage === "group");

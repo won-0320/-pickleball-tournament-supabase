@@ -9,7 +9,7 @@ export default async function AdminMatchesPage() {
 
   return (
     <main className="min-h-dvh">
-      <PollOnInterval intervalMs={5000} />
+      <PollOnInterval intervalMs={15000} />
       <AdminNav />
       <div className="mx-auto max-w-5xl px-6 py-8">
         <h1 className="mb-1 text-2xl font-bold text-neutral-900">경기 현황</h1>

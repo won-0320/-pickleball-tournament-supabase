@@ -50,7 +50,7 @@ export default async function TeamMatchesPage({
 
   return (
     <main className="min-h-dvh px-6 py-8">
-      <PollOnInterval intervalMs={6000} />
+      <PollOnInterval intervalMs={20000} />
       <div className="mx-auto max-w-md">
         <div className="mb-6">
           <p className="text-sm text-neutral-500">부문 {team.division} · {team.group}조</p>

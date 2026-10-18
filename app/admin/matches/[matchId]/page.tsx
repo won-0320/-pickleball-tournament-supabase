@@ -15,7 +15,7 @@ export default async function AdminMatchDetailPage({
 
   return (
     <main className="min-h-dvh">
-      <PollOnInterval intervalMs={5000} />
+      <PollOnInterval intervalMs={15000} />
       <AdminNav />
       <div className="mx-auto max-w-2xl px-6 py-8">
         <Link href="/admin/matches" className="mb-4 inline-block text-sm text-neutral-400 underline">

@@ -22,6 +22,13 @@ export interface DivisionWait {
   remaining: number; // 먼저 끝나야 하는 경기 중 아직 확정되지 않은 수
 }
 
+/** 이 부문 화면에 필요한 부문 목록 — 자기 부문 + 먼저 끝나야 하는 부문. */
+export function divisionsNeededFor(division: string): string[] {
+  const rule = DIVISION_PREREQUISITES[division];
+  const required = rule ? rule.requires.map((r) => r.division) : [];
+  return Array.from(new Set([division, ...required]));
+}
+
 export function divisionWait(division: string, allMatches: Match[]): DivisionWait | null {
   const rule = DIVISION_PREREQUISITES[division];
   if (!rule) return null;

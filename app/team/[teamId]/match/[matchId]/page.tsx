@@ -33,7 +33,7 @@ export default async function TeamMatchPage({
 
   return (
     <main className="min-h-dvh px-6 py-8">
-      <PollOnInterval intervalMs={4000} />
+      <PollOnInterval intervalMs={10000} />
       <div className="mx-auto max-w-md">
         <Link
           href={`/team/${session.teamId}`}

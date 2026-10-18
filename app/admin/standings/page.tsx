@@ -12,7 +12,7 @@ export default async function AdminStandingsPage() {
 
   return (
     <main className="min-h-dvh">
-      <PollOnInterval intervalMs={5000} />
+      <PollOnInterval intervalMs={15000} />
       <AdminNav />
       <div className="mx-auto max-w-4xl px-6 py-8">
         <h1 className="mb-1 text-2xl font-bold text-neutral-900">

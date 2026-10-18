@@ -684,17 +684,18 @@ export async function listTournaments(): Promise<{
   const tournaments = await Promise.all(
     snap.docs.map(async (doc) => {
       const t = doc.data();
-      const [teamsSnap, matchesSnap] = await Promise.all([
-        teamsCol(t.id).get(),
-        matchesCol(t.id).get(),
+      // 개수만 필요하므로 문서를 전부 읽지 않고 count 집계를 쓴다 (읽기 할당량 절약).
+      const [teamsCount, matchesCount] = await Promise.all([
+        teamsCol(t.id).count().get(),
+        matchesCol(t.id).count().get(),
       ]);
       return {
         id: t.id,
         name: t.name,
         status: t.status,
         createdAt: t.createdAt,
-        teamCount: teamsSnap.size,
-        matchCount: matchesSnap.size,
+        teamCount: teamsCount.data().count,
+        matchCount: matchesCount.data().count,
       };
     })
   );

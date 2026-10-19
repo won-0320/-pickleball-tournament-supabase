@@ -14,7 +14,7 @@ export default function AdminNav() {
     <nav className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-6 py-4">
       <div className="flex gap-4 text-sm font-medium text-neutral-600">
         {links.map((link) => (
-          <Link key={link.href} href={link.href} className="hover:text-neutral-900">
+          <Link key={link.href} href={link.href} replace className="hover:text-neutral-900">
             {link.label}
           </Link>
         ))}

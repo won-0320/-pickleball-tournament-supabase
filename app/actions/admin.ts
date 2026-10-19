@@ -1,7 +1,7 @@
 "use server";
 
 import crypto from "crypto";
-import { redirect } from "next/navigation";
+import { redirect, RedirectType } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   createAdminSession,
@@ -57,12 +57,12 @@ export async function adminLogin(
   }
 
   await createAdminSession();
-  redirect("/admin/upload");
+  redirect("/admin/upload", RedirectType.replace);
 }
 
 export async function adminLogout(): Promise<void> {
   await destroyAdminSession();
-  redirect("/admin/login");
+  redirect("/admin/login", RedirectType.replace);
 }
 
 export async function requireAdmin(): Promise<void> {

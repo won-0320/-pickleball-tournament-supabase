@@ -1,6 +1,6 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { redirect, RedirectType } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   findTeamByCode,
@@ -52,12 +52,12 @@ export async function joinWithCode(
   }
 
   await createTeamSession({ tournamentId: tournament.id, teamId: team.id });
-  redirect(`/team/${team.id}`);
+  redirect(`/team/${team.id}`, RedirectType.replace);
 }
 
 export async function leaveTeamSession(): Promise<void> {
   await destroyTeamSession();
-  redirect("/join");
+  redirect("/join", RedirectType.replace);
 }
 
 /**

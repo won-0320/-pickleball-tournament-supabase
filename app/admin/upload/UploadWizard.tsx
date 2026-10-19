@@ -8,6 +8,7 @@ import {
   type PreviewBracketResult,
   type CommitBracketResult,
 } from "@/app/actions/admin";
+import { sequenceNumbers } from "@/lib/matches/matchOrder";
 
 type Step = "form" | "preview" | "done";
 
@@ -81,6 +82,16 @@ export default function UploadWizard() {
 
   if (step === "preview" && preview) {
     const hasErrors = preview.errors.length > 0;
+    // 조별로 진행 순서대로 보여준다 (경기 현황·참가자 화면과 같은 번호).
+    const seqByMatch = sequenceNumbers(preview.groupMatches);
+    const previewRows = preview.groupMatches
+      .map((match) => ({ match, seq: seqByMatch.get(match)! }))
+      .sort(
+        (a, b) =>
+          a.match.division.localeCompare(b.match.division) ||
+          a.match.group.localeCompare(b.match.group) ||
+          a.seq - b.seq
+      );
     return (
       <div className="flex flex-col gap-6">
         <div>
@@ -136,16 +147,18 @@ export default function UploadWizard() {
               <tr>
                 <th className="px-3 py-2">부문</th>
                 <th className="px-3 py-2">조</th>
+                <th className="px-3 py-2">순서</th>
                 <th className="px-3 py-2">라운드</th>
                 <th className="px-3 py-2">팀A</th>
                 <th className="px-3 py-2">팀B</th>
               </tr>
             </thead>
             <tbody>
-              {preview.groupMatches.map((m, i) => (
+              {previewRows.map(({ match: m, seq }, i) => (
                 <tr key={i} className="border-t border-neutral-200">
                   <td className="px-3 py-2">{m.division}</td>
                   <td className="px-3 py-2">{m.group}</td>
+                  <td className="px-3 py-2">{seq}번째</td>
                   <td className="px-3 py-2">{m.round}</td>
                   <td className="px-3 py-2">{m.teamAName}</td>
                   <td className="px-3 py-2">{m.teamBName}</td>

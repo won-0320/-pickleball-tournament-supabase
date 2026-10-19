@@ -29,6 +29,7 @@ import {
 } from "@/lib/matches/scoreFlow";
 import { applyCascadingAdvancement } from "@/lib/matches/advancement";
 import { autoGenerateKnockoutBracket } from "@/lib/bracket/autoGenerateKnockout";
+import { computeMatchOrder } from "@/lib/matches/matchOrder";
 import type { Match, MatchStage, MatchStatus, Team, TournamentStatus } from "@/types/domain";
 
 export interface AdminLoginState {
@@ -277,6 +278,7 @@ export interface AdminMatchResult {
   match?: Match;
   teamA?: Team;
   teamB?: Team;
+  seq?: number; // 조(토너먼트는 부문) 안에서 몇 번째 경기인지
 }
 
 export async function getAdminMatch(matchId: string): Promise<AdminMatchResult> {
@@ -289,12 +291,19 @@ export async function getAdminMatch(matchId: string): Promise<AdminMatchResult> 
   const match = await db.getMatch(tournament.id, matchId);
   if (!match) return { authError: "경기를 찾을 수 없습니다." };
 
-  const [teamA, teamB] = await Promise.all([
+  const [teamA, teamB, divisionMatches] = await Promise.all([
     match.teamAId ? db.getTeam(tournament.id, match.teamAId) : Promise.resolve(null),
     match.teamBId ? db.getTeam(tournament.id, match.teamBId) : Promise.resolve(null),
+    db.listMatches(tournament.id, { divisions: [match.division] }),
   ]);
+  const { seq } = computeMatchOrder(divisionMatches);
 
-  return { match, teamA: teamA ?? undefined, teamB: teamB ?? undefined };
+  return {
+    match,
+    teamA: teamA ?? undefined,
+    teamB: teamB ?? undefined,
+    seq: seq.get(match.id),
+  };
 }
 
 export interface ResolveDisputeState {

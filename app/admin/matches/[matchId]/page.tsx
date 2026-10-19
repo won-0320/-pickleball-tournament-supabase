@@ -11,7 +11,7 @@ export default async function AdminMatchDetailPage({
 }) {
   await requireAdmin();
   const { matchId } = await params;
-  const { authError, match, teamA, teamB } = await getAdminMatch(matchId);
+  const { authError, match, teamA, teamB, seq } = await getAdminMatch(matchId);
 
   return (
     <main className="min-h-dvh">
@@ -24,7 +24,7 @@ export default async function AdminMatchDetailPage({
         {authError || !match ? (
           <p className="text-neutral-700">{authError ?? "경기를 찾을 수 없습니다."}</p>
         ) : (
-          <MatchAdminDetail match={match} teamA={teamA} teamB={teamB} />
+          <MatchAdminDetail match={match} teamA={teamA} teamB={teamB} seq={seq} />
         )}
       </div>
     </main>

@@ -10,10 +10,12 @@ export default function MatchAdminDetail({
   match,
   teamA,
   teamB,
+  seq,
 }: {
   match: Match;
   teamA?: Team;
   teamB?: Team;
+  seq?: number;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -75,6 +77,7 @@ export default function MatchAdminDetail({
       <div>
         <p className="text-xs text-neutral-500">
           {match.division} · {match.stage === "group" ? `조별리그 · ${match.group}조` : "토너먼트"} ·{" "}
+          {seq && <span className="font-semibold text-neutral-700">{seq}번째 경기 · </span>}
           {match.round}
         </p>
         <h1 className="text-xl font-bold text-neutral-900">

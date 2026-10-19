@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Match, MatchStage, MatchStatus } from "@/types/domain";
 import { STATUS_BADGE_CLASSES, STATUS_LABELS } from "@/lib/matches/statusLabels";
-import { divisionWait } from "@/lib/matches/divisionOrder";
+import { computeMatchOrder } from "@/lib/matches/matchOrder";
 
 const STATUS_OPTIONS: MatchStatus[] = [
   "pending",
@@ -17,38 +17,6 @@ const STAGE_LABELS: Record<MatchStage, string> = {
   group: "조별리그",
   knockout: "토너먼트",
 };
-
-interface MatchOrder {
-  seq: Map<string, number>; // 조(토너먼트는 부문) 안에서 몇 번째 경기인지 (1-based)
-  nextIds: Set<string>; // 조마다 다음 차례 경기
-}
-
-/**
- * 참가자 화면의 "조 전체 경기 순서"와 같은 규칙: 조별리그는 (부문, 조), 토너먼트는
- * 부문 단위로 라운드 → 경기 순서대로 번호를 매긴다. 먼저 끝나야 하는 다른 부문
- * 경기가 남아 있으면 그 부문에는 다음 차례를 표시하지 않는다.
- */
-function computeMatchOrder(matches: Match[]): MatchOrder {
-  const buckets = new Map<string, Match[]>();
-  for (const m of matches) {
-    if (m.isBye) continue;
-    const key = `${m.division}|${m.stage}|${m.stage === "group" ? (m.group ?? "") : ""}`;
-    const list = buckets.get(key) ?? [];
-    list.push(m);
-    buckets.set(key, list);
-  }
-
-  const seq = new Map<string, number>();
-  const nextIds = new Set<string>();
-  for (const list of buckets.values()) {
-    list.sort((a, b) => (a.roundIndex ?? 0) - (b.roundIndex ?? 0) || (a.order ?? 0) - (b.order ?? 0));
-    list.forEach((m, i) => seq.set(m.id, i + 1));
-    if (divisionWait(list[0]!.division, matches)) continue;
-    const next = list.find((m) => m.status !== "confirmed" && m.teamAId && m.teamBId);
-    if (next) nextIds.add(next.id);
-  }
-  return { seq, nextIds };
-}
 
 export default function MatchesDashboard({ matches }: { matches: Match[] }) {
   const [division, setDivision] = useState("all");
